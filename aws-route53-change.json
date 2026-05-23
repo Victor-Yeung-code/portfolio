@@ -1,0 +1,17 @@
+{
+  "Comment": "Point victor-yeung.com to the S3 static website endpoint in us-west-2.",
+  "Changes": [
+    {
+      "Action": "UPSERT",
+      "ResourceRecordSet": {
+        "Name": "victor-yeung.com.",
+        "Type": "A",
+        "AliasTarget": {
+          "HostedZoneId": "Z3BJ6K6RIION7M",
+          "DNSName": "s3-website-us-west-2.amazonaws.com.",
+          "EvaluateTargetHealth": false
+        }
+      }
+    }
+  ]
+}
