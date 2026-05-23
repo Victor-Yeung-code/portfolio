@@ -1,0 +1,144 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+  title="Victor Yeung | Photography Portfolio"
+  description="Victor Yeung's art and photography portfolio is coming soon."
+>
+  <main class="home">
+    <section class="hero" aria-labelledby="page-title">
+      <div class="copy">
+        <p class="eyebrow">Art / Photography</p>
+        <h1 id="page-title">Victor Yeung</h1>
+        <p class="dek">A new portfolio is coming soon.</p>
+      </div>
+
+      <div class="frames" aria-hidden="true">
+        <div class="frame frame-one"></div>
+        <div class="frame frame-two"></div>
+        <div class="frame frame-three"></div>
+      </div>
+    </section>
+  </main>
+</BaseLayout>
+
+<style>
+  :global(*) {
+    box-sizing: border-box;
+  }
+
+  :global(body) {
+    margin: 0;
+    font-family: Arial, Helvetica, sans-serif;
+    background: #f7f3ed;
+    color: #111;
+  }
+
+  .home {
+    min-height: 100vh;
+    overflow: hidden;
+  }
+
+  .hero {
+    align-items: center;
+    display: grid;
+    gap: clamp(2rem, 6vw, 5rem);
+    grid-template-columns: minmax(0, 0.9fr) minmax(18rem, 1.1fr);
+    min-height: 100vh;
+    padding: clamp(2rem, 6vw, 5rem);
+  }
+
+  .copy {
+    max-width: 42rem;
+  }
+
+  .eyebrow {
+    color: #686056;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    margin: 0 0 1rem;
+    text-transform: uppercase;
+  }
+
+  h1 {
+    font-size: clamp(4rem, 14vw, 11rem);
+    font-weight: 800;
+    letter-spacing: 0;
+    line-height: 0.88;
+    margin: 0;
+    max-width: 8ch;
+  }
+
+  .dek {
+    color: #3b3935;
+    font-size: clamp(1.1rem, 2.4vw, 1.8rem);
+    line-height: 1.4;
+    margin: 1.6rem 0 0;
+  }
+
+  .frames {
+    aspect-ratio: 5 / 4;
+    display: grid;
+    min-height: 22rem;
+    position: relative;
+  }
+
+  .frame {
+    border: 10px solid #fffaf3;
+    box-shadow: 0 24px 60px rgb(0 0 0 / 18%);
+    position: absolute;
+  }
+
+  .frame-one {
+    background:
+      linear-gradient(145deg, rgb(19 30 35 / 20%), rgb(19 30 35 / 0%)),
+      linear-gradient(120deg, #516775, #c7c2b6 52%, #2f3839);
+    height: 58%;
+    left: 4%;
+    top: 8%;
+    transform: rotate(-5deg);
+    width: 58%;
+  }
+
+  .frame-two {
+    background:
+      linear-gradient(180deg, rgb(255 255 255 / 12%), rgb(255 255 255 / 0%)),
+      linear-gradient(135deg, #d6c9b2, #6f7f79 48%, #141817);
+    height: 70%;
+    right: 2%;
+    top: 18%;
+    transform: rotate(4deg);
+    width: 50%;
+  }
+
+  .frame-three {
+    background:
+      linear-gradient(160deg, rgb(255 255 255 / 22%), rgb(255 255 255 / 0%)),
+      linear-gradient(120deg, #1d1f1f, #a5523f 42%, #e4d4b9);
+    bottom: 5%;
+    height: 44%;
+    left: 22%;
+    transform: rotate(1deg);
+    width: 46%;
+  }
+
+  @media (max-width: 760px) {
+    .hero {
+      align-content: center;
+      grid-template-columns: 1fr;
+      min-height: 100svh;
+      padding: 2rem;
+    }
+
+    .frames {
+      min-height: 16rem;
+      order: -1;
+    }
+
+    h1 {
+      font-size: clamp(3.4rem, 20vw, 6rem);
+    }
+  }
+</style>

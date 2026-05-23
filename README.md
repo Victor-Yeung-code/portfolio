@@ -4,11 +4,11 @@ Personal portfolio website for Victor Yeung, focused on art and photography.
 
 ## Current State
 
-The temporary test site is live at:
+The M1 foundation is live at:
 
-- http://victor-yeung.com
+- https://victor-yeung.com
 
-It currently serves a simple `Hello world` page from an S3 static website bucket and includes the Google Analytics tag `G-8EK1C2QSY7`.
+The site is served by CloudFront over HTTPS from a private S3 bucket and includes the Google Analytics tag `G-8EK1C2QSY7`.
 
 ## Target Architecture
 
@@ -22,6 +22,28 @@ The production version will move to:
 - Lambda-based image pipeline
 - Admin UI for uploads, metadata, watermark settings, and soft-delete
 
+## M1 Foundation
+
+The M1 implementation lives in:
+
+- `site/` - Astro coming-soon site
+- `infra/` - AWS CDK foundation stack
+
+M1 intentionally does not include GitHub Actions yet. Deploy manually with:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\infra\scripts\deploy-m1.ps1
+```
+
+M1 sets up:
+
+- HTTPS via CloudFront + ACM
+- private S3 site bucket
+- private S3 photos bucket
+- CloudFront Origin Access Control
+- `victor-yeung.com` as the canonical apex domain
+- `www.victor-yeung.com` redirecting to the apex domain
+
 ## Launch Decisions
 
 - `www.victor-yeung.com` redirects to `victor-yeung.com`
@@ -30,20 +52,6 @@ The production version will move to:
 - Admin delete starts as soft-delete
 - Full admin system ships before public launch
 
-## Temporary Deployment
+## Previous Temporary Site
 
-The files in the repo root are the temporary S3 website setup:
-
-- `index.html`
-- `deploy-static-site.ps1`
-- `aws-website.json`
-- `aws-bucket-policy.json`
-- `aws-route53-change.json`
-
-Run this to redeploy the temporary site:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\deploy-static-site.ps1
-```
-
-M1 will replace the temporary public S3 website setup with CloudFront + HTTPS + private S3.
+The earlier HTTP-only S3 website bucket was replaced by M1 DNS records pointing to CloudFront. The temporary deployment files were removed from this branch to avoid accidentally restoring the old HTTP-only path.
