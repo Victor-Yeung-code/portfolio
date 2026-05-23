@@ -8,7 +8,7 @@ The M1 foundation is live at:
 
 - https://victor-yeung.com
 
-The site is served by CloudFront over HTTPS from a private S3 bucket and includes the Google Analytics tag `G-8EK1C2QSY7`.
+The site is served by CloudFront over HTTPS from a private S3 bucket.
 
 ## Target Architecture
 
@@ -43,6 +43,54 @@ M1 sets up:
 - CloudFront Origin Access Control
 - `victor-yeung.com` as the canonical apex domain
 - `www.victor-yeung.com` redirecting to the apex domain
+
+## Analytics
+
+Google Analytics is opt-in via `PUBLIC_GA_ID`.
+
+Create `site/.env` on the deploy machine to enable it:
+
+```text
+PUBLIC_GA_ID=G-8EK1C2QSY7
+```
+
+Leave `PUBLIC_GA_ID` unset to build without Google Analytics. The layout also skips analytics on future `/admin/*` routes. A cookie-consent banner is intentionally deferred until traffic/privacy requirements justify it.
+
+## Rollback
+
+For a broken site content deploy, restore a previous S3 object version and invalidate CloudFront:
+
+```powershell
+aws s3api list-object-versions --bucket victor-yeung-site --prefix index.html
+
+aws s3api copy-object --bucket victor-yeung-site --key index.html `
+  --copy-source "victor-yeung-site/index.html?versionId=<VERSION_ID>"
+
+aws cloudfront create-invalidation --distribution-id <DISTRIBUTION_ID> --paths "/*"
+```
+
+For infrastructure deploy failures, CloudFormation automatically rolls back failed stack updates. For a successful but incorrect infrastructure change, revert the commit and rerun:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\infra\scripts\deploy-m1.ps1
+```
+
+For a structural change that needs CloudFormation rollback:
+
+```powershell
+aws cloudformation rollback-stack --stack-name VictorPortfolioFoundationStack --region us-west-2
+```
+
+For a last-resort full teardown, remember the S3 buckets use `RETAIN`. Empty and remove retained buckets manually, then destroy the stacks:
+
+```powershell
+aws s3 rm s3://victor-yeung-site --recursive
+aws s3 rm s3://victor-yeung-photos --recursive
+aws s3 rb s3://victor-yeung-site
+aws s3 rb s3://victor-yeung-photos
+cd infra
+npx cdk destroy --all
+```
 
 ## Launch Decisions
 

@@ -1,9 +1,7 @@
 param(
   [string] $Profile = 'default',
   [string] $Region = 'us-west-2',
-  [string] $CertificateRegion = 'us-east-1',
-  [string] $Domain = 'victor-yeung.com',
-  [string] $HostedZoneId = 'Z0659489BL36QJD9CF0F'
+  [string] $CertificateRegion = 'us-east-1'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -11,8 +9,6 @@ $ErrorActionPreference = 'Stop'
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $InfraRoot = Split-Path -Parent $ScriptRoot
 $RepoRoot = Split-Path -Parent $InfraRoot
-$WwwDomain = "www.$Domain"
-$CloudFrontHostedZoneId = 'Z2FDTNDATAQYW2'
 
 function Resolve-AwsCli {
   if ($env:AWS_CLI_PATH -and (Test-Path -LiteralPath $env:AWS_CLI_PATH)) {
@@ -86,157 +82,27 @@ function Invoke-Npm {
   }
 }
 
-function Get-FileUri {
-  param([string] $Path)
-
-  $fullPath = (Resolve-Path -LiteralPath $Path).Path
-  return "file://$fullPath"
-}
-
-function Write-AwsJson {
+function Invoke-Cdk {
   param(
-    [string] $Path,
-    [object] $Value
+    [Parameter(ValueFromRemainingArguments = $true)]
+    [string[]] $Arguments
   )
 
-  $json = $Value | ConvertTo-Json -Depth 12
-  $encoding = New-Object System.Text.UTF8Encoding $false
-  [System.IO.File]::WriteAllText($Path, $json, $encoding)
-}
-
-function Get-UsableCertificateArn {
-  $certificatesJson = & $Aws acm list-certificates `
-    --region $CertificateRegion `
-    --profile $Profile `
-    --certificate-statuses ISSUED PENDING_VALIDATION `
-    --output json
-
-  if ($LASTEXITCODE -ne 0) {
-    throw 'Unable to list ACM certificates.'
+  $cdk = Join-Path $InfraRoot 'node_modules\.bin\cdk.cmd'
+  if (-not (Test-Path -LiteralPath $cdk)) {
+    throw "CDK executable not found at $cdk"
   }
 
-  $certificates = ($certificatesJson | ConvertFrom-Json).CertificateSummaryList
-  foreach ($summary in $certificates) {
-    if ($summary.DomainName -ne $Domain) {
-      continue
-    }
-
-    $detailsJson = & $Aws acm describe-certificate `
-      --certificate-arn $summary.CertificateArn `
-      --region $CertificateRegion `
-      --profile $Profile `
-      --output json
-
+  Push-Location $InfraRoot
+  try {
+    & $cdk @Arguments
     if ($LASTEXITCODE -ne 0) {
-      throw "Unable to describe ACM certificate $($summary.CertificateArn)."
-    }
-
-    $certificate = ($detailsJson | ConvertFrom-Json).Certificate
-    $names = @($certificate.SubjectAlternativeNames)
-    if ($names -contains $Domain -and $names -contains $WwwDomain) {
-      return $certificate.CertificateArn
+      throw "CDK failed: $($Arguments -join ' ')"
     }
   }
-
-  return $null
-}
-
-function Ensure-Certificate {
-  $certificateArn = Get-UsableCertificateArn
-
-  if (-not $certificateArn) {
-    Write-Host "Requesting ACM certificate in $CertificateRegion for $Domain and $WwwDomain"
-    $certificateArn = & $Aws acm request-certificate `
-      --domain-name $Domain `
-      --subject-alternative-names $WwwDomain `
-      --validation-method DNS `
-      --region $CertificateRegion `
-      --profile $Profile `
-      --query CertificateArn `
-      --output text
-
-    if ($LASTEXITCODE -ne 0 -or -not $certificateArn) {
-      throw 'Unable to request ACM certificate.'
-    }
+  finally {
+    Pop-Location
   }
-  else {
-    Write-Host "Using existing ACM certificate $certificateArn"
-  }
-
-  $validationRecords = @()
-  for ($attempt = 1; $attempt -le 30; $attempt++) {
-    $detailsJson = & $Aws acm describe-certificate `
-      --certificate-arn $certificateArn `
-      --region $CertificateRegion `
-      --profile $Profile `
-      --output json
-
-    if ($LASTEXITCODE -ne 0) {
-      throw "Unable to describe ACM certificate $certificateArn."
-    }
-
-    $certificate = ($detailsJson | ConvertFrom-Json).Certificate
-    if ($certificate.Status -eq 'ISSUED') {
-      Write-Host 'ACM certificate is already issued.'
-      return $certificateArn
-    }
-
-    $validationRecords = @(
-      $certificate.DomainValidationOptions |
-        Where-Object { $_.ResourceRecord } |
-        ForEach-Object { $_.ResourceRecord }
-    )
-
-    if ($validationRecords.Count -gt 0) {
-      break
-    }
-
-    Write-Host "Waiting for ACM DNS validation records to appear ($attempt/30)"
-    Start-Sleep -Seconds 5
-  }
-
-  if ($validationRecords.Count -eq 0) {
-    throw 'ACM did not return DNS validation records.'
-  }
-
-  $changes = @()
-  foreach ($record in $validationRecords) {
-    $changes += @{
-      Action = 'UPSERT'
-      ResourceRecordSet = @{
-        Name = $record.Name
-        Type = $record.Type
-        TTL = 300
-        ResourceRecords = @(
-          @{
-            Value = $record.Value
-          }
-        )
-      }
-    }
-  }
-
-  $changeBatch = @{
-    Comment = "ACM validation for $Domain"
-    Changes = $changes
-  }
-
-  $validationPath = Join-Path $env:TEMP 'victor-portfolio-acm-validation.json'
-  Write-AwsJson $validationPath $changeBatch
-
-  Write-Host 'Upserting ACM validation records in Route 53'
-  Invoke-Aws route53 change-resource-record-sets `
-    --hosted-zone-id $HostedZoneId `
-    --change-batch (Get-FileUri $validationPath) `
-    --profile $Profile | Out-Host
-
-  Write-Host 'Waiting for ACM certificate validation. This can take several minutes.'
-  Invoke-Aws acm wait certificate-validated `
-    --certificate-arn $certificateArn `
-    --region $CertificateRegion `
-    --profile $Profile
-
-  return $certificateArn
 }
 
 function Get-StackOutput {
@@ -253,10 +119,13 @@ function Get-StackOutput {
   return $match.OutputValue
 }
 
-Write-Host "Deploying M1 foundation for $Domain"
+Write-Host 'Resolving AWS account'
+$accountId = & $Aws sts get-caller-identity --profile $Profile --query Account --output text
+if ($LASTEXITCODE -ne 0 -or -not $accountId) {
+  throw 'Unable to resolve AWS account for the selected profile.'
+}
 
-$certificateArn = Ensure-Certificate
-Write-Host "Certificate ARN: $certificateArn"
+Write-Host "Deploying M1 foundation in account $accountId"
 
 Write-Host 'Installing infrastructure dependencies'
 Invoke-Npm $InfraRoot install
@@ -264,35 +133,11 @@ Invoke-Npm $InfraRoot install
 Write-Host 'Type-checking infrastructure'
 Invoke-Npm $InfraRoot run build
 
-Write-Host 'Synthesizing CDK stack'
-$Cdk = Join-Path $InfraRoot 'node_modules\.bin\cdk.cmd'
-if (-not (Test-Path -LiteralPath $Cdk)) {
-  throw "CDK executable not found at $Cdk"
-}
+Write-Host 'Bootstrapping CDK environments'
+Invoke-Cdk bootstrap "aws://$accountId/$CertificateRegion" "aws://$accountId/$Region" --profile $Profile
 
-Push-Location $InfraRoot
-try {
-  & $Cdk `
-    --context "certificateArn=$certificateArn" `
-    synth VictorPortfolioFoundationStack `
-    --quiet
-
-  if ($LASTEXITCODE -ne 0) {
-    throw 'CDK synth failed.'
-  }
-}
-finally {
-  Pop-Location
-}
-
-Write-Host 'Deploying synthesized CloudFormation template'
-$templatePath = Join-Path $InfraRoot 'cdk.out\VictorPortfolioFoundationStack.template.json'
-Invoke-Aws cloudformation deploy `
-  --stack-name VictorPortfolioFoundationStack `
-  --template-file $templatePath `
-  --capabilities CAPABILITY_IAM `
-  --region $Region `
-  --profile $Profile
+Write-Host 'Deploying CDK stacks'
+Invoke-Cdk deploy --all --profile $Profile --require-approval never
 
 Write-Host 'Installing site dependencies'
 Invoke-Npm (Join-Path $RepoRoot 'site') install
@@ -321,69 +166,6 @@ Invoke-Aws s3 sync (Join-Path $RepoRoot 'site\dist') "s3://$siteBucket" `
   --delete `
   --profile $Profile
 
-$route53Changes = @{
-  Comment = "Point $Domain and $WwwDomain to CloudFront"
-  Changes = @(
-    @{
-      Action = 'UPSERT'
-      ResourceRecordSet = @{
-        Name = "$Domain."
-        Type = 'A'
-        AliasTarget = @{
-          HostedZoneId = $CloudFrontHostedZoneId
-          DNSName = "$distributionDomainName."
-          EvaluateTargetHealth = $false
-        }
-      }
-    },
-    @{
-      Action = 'UPSERT'
-      ResourceRecordSet = @{
-        Name = "$Domain."
-        Type = 'AAAA'
-        AliasTarget = @{
-          HostedZoneId = $CloudFrontHostedZoneId
-          DNSName = "$distributionDomainName."
-          EvaluateTargetHealth = $false
-        }
-      }
-    },
-    @{
-      Action = 'UPSERT'
-      ResourceRecordSet = @{
-        Name = "$WwwDomain."
-        Type = 'A'
-        AliasTarget = @{
-          HostedZoneId = $CloudFrontHostedZoneId
-          DNSName = "$distributionDomainName."
-          EvaluateTargetHealth = $false
-        }
-      }
-    },
-    @{
-      Action = 'UPSERT'
-      ResourceRecordSet = @{
-        Name = "$WwwDomain."
-        Type = 'AAAA'
-        AliasTarget = @{
-          HostedZoneId = $CloudFrontHostedZoneId
-          DNSName = "$distributionDomainName."
-          EvaluateTargetHealth = $false
-        }
-      }
-    }
-  )
-}
-
-$route53Path = Join-Path $env:TEMP 'victor-portfolio-cloudfront-aliases.json'
-Write-AwsJson $route53Path $route53Changes
-
-Write-Host 'Upserting Route 53 aliases to CloudFront'
-Invoke-Aws route53 change-resource-record-sets `
-  --hosted-zone-id $HostedZoneId `
-  --change-batch (Get-FileUri $route53Path) `
-  --profile $Profile | Out-Host
-
 Write-Host 'Invalidating CloudFront'
 Invoke-Aws cloudfront create-invalidation `
   --distribution-id $distributionId `
@@ -392,5 +174,5 @@ Invoke-Aws cloudfront create-invalidation `
 
 Write-Host 'Done.'
 Write-Host "CloudFront domain: https://$distributionDomainName"
-Write-Host "Website: https://$Domain"
-Write-Host "WWW redirect: https://$WwwDomain"
+Write-Host 'Website: https://victor-yeung.com'
+Write-Host 'WWW redirect: https://www.victor-yeung.com'

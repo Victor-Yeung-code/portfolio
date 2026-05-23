@@ -1,5 +1,6 @@
 import * as cdk from 'aws-cdk-lib';
 import { CfnOutput, Duration, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
+import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as route53 from 'aws-cdk-lib/aws-route53';
@@ -7,12 +8,13 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import { Construct } from 'constructs';
 
 interface VictorPortfolioFoundationStackProps extends StackProps {
-  certificateArn: string;
+  certificate: acm.ICertificate;
 }
 
 const DOMAIN_NAME = 'victor-yeung.com';
 const WWW_DOMAIN_NAME = `www.${DOMAIN_NAME}`;
 const CLOUDFRONT_HOSTED_ZONE_ID = 'Z2FDTNDATAQYW2';
+const HOSTED_ZONE_ID = 'Z0659489BL36QJD9CF0F';
 
 export class VictorPortfolioFoundationStack extends Stack {
   constructor(scope: Construct, id: string, props: VictorPortfolioFoundationStackProps) {
@@ -23,6 +25,7 @@ export class VictorPortfolioFoundationStack extends Stack {
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
       encryption: s3.BucketEncryption.S3_MANAGED,
       enforceSSL: true,
+      versioned: true,
       removalPolicy: RemovalPolicy.RETAIN
     });
 
@@ -169,7 +172,7 @@ function handler(event) {
         ],
         priceClass: 'PriceClass_100',
         viewerCertificate: {
-          acmCertificateArn: props.certificateArn,
+          acmCertificateArn: props.certificate.certificateArn,
           minimumProtocolVersion: 'TLSv1.2_2021',
           sslSupportMethod: 'sni-only'
         },
@@ -219,6 +222,40 @@ function handler(event) {
         })
       );
     }
+
+    const zone = route53.HostedZone.fromHostedZoneAttributes(this, 'HostedZone', {
+      hostedZoneId: HOSTED_ZONE_ID,
+      zoneName: DOMAIN_NAME
+    });
+
+    const distributionAliasTarget: route53.IAliasRecordTarget = {
+      bind: () => ({
+        dnsName: distribution.attrDomainName,
+        hostedZoneId: CLOUDFRONT_HOSTED_ZONE_ID
+      })
+    };
+
+    new route53.ARecord(this, 'ApexARecord', {
+      zone,
+      target: route53.RecordTarget.fromAlias(distributionAliasTarget)
+    });
+
+    new route53.AaaaRecord(this, 'ApexAaaaRecord', {
+      zone,
+      target: route53.RecordTarget.fromAlias(distributionAliasTarget)
+    });
+
+    new route53.ARecord(this, 'WwwARecord', {
+      zone,
+      recordName: 'www',
+      target: route53.RecordTarget.fromAlias(distributionAliasTarget)
+    });
+
+    new route53.AaaaRecord(this, 'WwwAaaaRecord', {
+      zone,
+      recordName: 'www',
+      target: route53.RecordTarget.fromAlias(distributionAliasTarget)
+    });
 
     new CfnOutput(this, 'SiteBucketName', { value: siteBucket.bucketName });
     new CfnOutput(this, 'PhotosBucketName', { value: photosBucket.bucketName });

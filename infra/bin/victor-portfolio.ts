@@ -1,19 +1,31 @@
 #!/usr/bin/env node
 import * as cdk from 'aws-cdk-lib';
+import { VictorPortfolioCertStack } from '../lib/victor-portfolio-cert-stack.js';
 import { VictorPortfolioFoundationStack } from '../lib/victor-portfolio-stack.js';
 
 const app = new cdk.App();
-const certificateArn = app.node.tryGetContext('certificateArn') ?? process.env.CERTIFICATE_ARN;
+const account = process.env.CDK_DEFAULT_ACCOUNT;
 
-if (!certificateArn || typeof certificateArn !== 'string') {
-  throw new Error('Missing certificateArn. Pass -c certificateArn=arn:aws:acm:us-east-1:...');
+if (!account) {
+  throw new Error('CDK_DEFAULT_ACCOUNT was not set. Run with an AWS profile/account.');
 }
 
-new VictorPortfolioFoundationStack(app, 'VictorPortfolioFoundationStack', {
+const certStack = new VictorPortfolioCertStack(app, 'VictorPortfolioCertStack', {
   env: {
-    account: process.env.CDK_DEFAULT_ACCOUNT,
-    region: process.env.CDK_DEFAULT_REGION ?? 'us-west-2'
+    account,
+    region: 'us-east-1'
   },
-  synthesizer: new cdk.CliCredentialsStackSynthesizer(),
-  certificateArn
+  crossRegionReferences: true
 });
+
+const foundationStack = new VictorPortfolioFoundationStack(app, 'VictorPortfolioFoundationStack', {
+  env: {
+    account,
+    region: 'us-west-2'
+  },
+  crossRegionReferences: true,
+  synthesizer: new cdk.CliCredentialsStackSynthesizer(),
+  certificate: certStack.certificate
+});
+
+foundationStack.addDependency(certStack);
