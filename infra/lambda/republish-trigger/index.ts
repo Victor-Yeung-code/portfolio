@@ -1,8 +1,4 @@
 import {
-  CloudFrontClient,
-  CreateInvalidationCommand
-} from '@aws-sdk/client-cloudfront';
-import {
   ListObjectsV2Command,
   S3Client
 } from '@aws-sdk/client-s3';
@@ -13,11 +9,9 @@ import {
 
 const s3 = new S3Client({});
 const sqs = new SQSClient({});
-const cloudFront = new CloudFrontClient({});
 
 const bucketName = process.env.PHOTOS_BUCKET;
 const queueUrl = process.env.QUEUE_URL;
-const distributionId = process.env.DISTRIBUTION_ID;
 const supportedExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp', '.tif', '.tiff', '.avif']);
 
 if (!bucketName) {
@@ -28,20 +22,14 @@ if (!queueUrl) {
   throw new Error('Missing QUEUE_URL environment variable.');
 }
 
-if (!distributionId) {
-  throw new Error('Missing DISTRIBUTION_ID environment variable.');
-}
-
-export const handler = async (): Promise<{ count: number; invalidationId?: string }> => {
+export const handler = async (): Promise<{ count: number }> => {
   const originalKeys = await listOriginalKeys();
   await sendReprocessMessages(originalKeys);
-  const invalidationId = await invalidateRepublishedAssets();
 
   console.log(`Queued ${originalKeys.length} originals for reprocessing.`);
 
   return {
-    count: originalKeys.length,
-    invalidationId
+    count: originalKeys.length
   };
 };
 
@@ -87,23 +75,6 @@ async function sendReprocessMessages(originalKeys: string[]): Promise<void> {
       throw new Error(`Failed to enqueue reprocess messages: ${response.Failed.map((item) => item.Id).join(', ')}`);
     }
   }
-}
-
-async function invalidateRepublishedAssets(): Promise<string | undefined> {
-  const response = await cloudFront.send(
-    new CreateInvalidationCommand({
-      DistributionId: distributionId,
-      InvalidationBatch: {
-        CallerReference: `republish-${Date.now()}`,
-        Paths: {
-          Quantity: 2,
-          Items: ['/photos/*', '/data/photos.json']
-        }
-      }
-    })
-  );
-
-  return response.Invalidation?.Id;
 }
 
 function isSupportedOriginal(key: string): boolean {

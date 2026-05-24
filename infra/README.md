@@ -15,7 +15,8 @@ This milestone uses AWS CDK for the foundation and a manual PowerShell deploy sc
 - Image processor Lambda triggered by S3 changes under `originals/`
 - Sharp Lambda layer for WebP variant generation and watermark compositing
 - SQS queue and DLQ for republishing all image variants
-- Republish trigger Lambda for enqueueing all originals and invalidating CloudFront
+- Republish trigger Lambda for enqueueing all originals
+- Basic-auth protected admin UI and admin API behind CloudFront
 
 ## Image Pipeline
 
@@ -63,7 +64,24 @@ $fn = aws cloudformation describe-stacks `
 aws lambda invoke --function-name $fn .\.cache\republish-output.json
 ```
 
-The trigger paginates `originals/`, sends one SQS message per original, and invalidates `/photos/*` plus `/data/photos.json`. The image processor consumes the SQS queue with batch size `1`; failed messages are retried up to three receives before moving to `image-reprocess-dlq`.
+The trigger paginates `originals/` and sends one SQS message per original. The image processor consumes the SQS queue with batch size `1`; failed messages are retried up to three receives before moving to `image-reprocess-dlq`. In M4, the admin UI polls queue depth and creates the CloudFront invalidation after the queue drains.
+
+## Admin
+
+The admin UI is available at:
+
+```text
+https://victor-yeung.com/admin/
+```
+
+Set deploy-time Basic Auth credentials before CDK synth/deploy. The deploy script loads `infra/.env` automatically:
+
+```powershell
+Copy-Item .\infra\.env.example .\infra\.env
+# edit ADMIN_USERNAME and ADMIN_PASSWORD locally
+```
+
+Do not commit `infra/.env`. The CloudFront Function protects `/admin*` and `/api/admin*`. The admin API also requires a private CloudFront origin header so the public API Gateway URL cannot bypass Basic Auth.
 
 ## Deploy
 
@@ -78,6 +96,7 @@ The script expects:
 - AWS CLI v2 configured with the `default` profile
 - Node.js 22+ with npm available
 - Existing Route 53 hosted zone `victor-yeung.com`
+- `ADMIN_USERNAME` and `ADMIN_PASSWORD` in `infra/.env` or the current shell
 
 On this machine, the script also detects the local portable Node/npm under `tools/`.
 

@@ -1,0 +1,8 @@
+---
+import AdminApp from '../../components/admin/AdminApp';
+import BaseLayout from '../../layouts/BaseLayout.astro';
+---
+
+<BaseLayout title="Victor Yeung Admin" description="Portfolio administration for Victor Yeung.">
+  <AdminApp client:only="react" />
+</BaseLayout>

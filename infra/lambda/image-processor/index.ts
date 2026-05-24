@@ -8,69 +8,18 @@ import {
 import type { S3Event, S3EventRecord, SQSEvent, SQSRecord } from 'aws-lambda';
 import sharp from 'sharp';
 import { basename, extname } from 'node:path';
+import { hasErrorName, stripBom, updatePhotosJson as updateStoredPhotosJson } from '../_shared/photos-json.js';
+import type { PhotoEntry, PhotoVariantName, PhotosJson, WatermarkConfig, WatermarkPosition } from '../_shared/types.js';
+import { watermarkPositions } from '../_shared/types.js';
 
 const s3 = new S3Client({});
 
-const bucketName = process.env.PHOTOS_BUCKET;
-const photosJsonKey = 'data/photos.json';
+const bucketName = requiredEnv('PHOTOS_BUCKET');
 const watermarkJsonKey = 'data/watermark.json';
 const supportedExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp', '.tif', '.tiff', '.avif']);
-const watermarkPositions = new Set([
-  'top-left',
-  'top-center',
-  'top-right',
-  'middle-left',
-  'middle-center',
-  'middle-right',
-  'bottom-left',
-  'bottom-center',
-  'bottom-right'
-]);
-
-if (!bucketName) {
-  throw new Error('Missing PHOTOS_BUCKET environment variable.');
-}
+const watermarkPositionSet = new Set<string>(watermarkPositions);
 
 type ImageEvent = S3Event | SQSEvent;
-type PhotoVariantName = 'thumb' | 'medium' | 'full';
-type WatermarkPosition =
-  | 'top-left'
-  | 'top-center'
-  | 'top-right'
-  | 'middle-left'
-  | 'middle-center'
-  | 'middle-right'
-  | 'bottom-left'
-  | 'bottom-center'
-  | 'bottom-right';
-
-interface PhotoEntry {
-  id: string;
-  title: string;
-  description: string;
-  album: string;
-  order: number;
-  originalKey: string;
-  variants: Record<PhotoVariantName, string>;
-  width: number;
-  height: number;
-  takenAt: string | null;
-  tags: string[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface PhotosJson {
-  version: number;
-  updatedAt: string;
-  photos: PhotoEntry[];
-}
-
-interface PhotosDocument {
-  data: PhotosJson;
-  etag?: string;
-  exists: boolean;
-}
 
 interface OriginalObject {
   bytes: Uint8Array;
@@ -81,16 +30,6 @@ interface OriginalObject {
 interface ImageDimensions {
   width: number;
   height: number;
-}
-
-interface WatermarkConfig {
-  file: string;
-  position: WatermarkPosition;
-  marginPct: number;
-  widthPct: number;
-  opacity: number;
-  minWidthPx: number;
-  maxWidthPx: number;
 }
 
 interface WatermarkState {
@@ -262,7 +201,9 @@ async function upsertPhotoMetadata(
       takenAt: existing?.takenAt ?? null,
       tags: existing?.tags ?? [],
       createdAt: previousCreatedAt,
-      updatedAt: metadataMode === 'reprocess' && existing ? existing.updatedAt : now
+      updatedAt: metadataMode === 'reprocess' && existing ? existing.updatedAt : now,
+      deleted: existing?.deleted ?? false,
+      deletedAt: existing?.deletedAt ?? null
     };
 
     if (existing && photoEntriesEqual(existing, entry)) {
@@ -500,7 +441,7 @@ function normalizeWatermarkConfig(input: Partial<WatermarkConfig>): WatermarkCon
   }
 
   const position =
-    typeof input.position === 'string' && watermarkPositions.has(input.position)
+    typeof input.position === 'string' && watermarkPositionSet.has(input.position)
       ? (input.position as WatermarkPosition)
       : 'bottom-right';
 
@@ -561,74 +502,7 @@ async function deleteVariants(id: string, extension: string): Promise<void> {
 }
 
 async function updatePhotosJson(mutator: (current: PhotosJson) => PhotosJson): Promise<void> {
-  for (let attempt = 1; attempt <= 5; attempt++) {
-    const document = await readPhotosJson();
-    const next = mutator(document.data);
-
-    if (next === document.data) {
-      return;
-    }
-
-    try {
-      await s3.send(
-        new PutObjectCommand({
-          Bucket: bucketName,
-          Key: photosJsonKey,
-          Body: JSON.stringify(next, null, 2),
-          CacheControl: 'public, max-age=60',
-          ContentType: 'application/json; charset=utf-8',
-          ...(document.exists ? { IfMatch: document.etag } : { IfNoneMatch: '*' })
-        })
-      );
-      return;
-    } catch (error) {
-      if (isConditionalWriteFailure(error) && attempt < 5) {
-        await sleep(100 * attempt);
-        continue;
-      }
-
-      throw error;
-    }
-  }
-}
-
-async function readPhotosJson(): Promise<PhotosDocument> {
-  try {
-    const response = await s3.send(new GetObjectCommand({ Bucket: bucketName, Key: photosJsonKey }));
-    const body = response.Body ? await response.Body.transformToString('utf-8') : '';
-    const parsed = body ? (JSON.parse(stripBom(body)) as PhotosJson) : createEmptyPhotosJson();
-
-    return {
-      data: normalizePhotosJson(parsed),
-      etag: response.ETag,
-      exists: true
-    };
-  } catch (error) {
-    if (error instanceof NoSuchKey || hasErrorName(error, 'NoSuchKey')) {
-      return {
-        data: createEmptyPhotosJson(),
-        exists: false
-      };
-    }
-
-    throw error;
-  }
-}
-
-function createEmptyPhotosJson(): PhotosJson {
-  return {
-    version: 0,
-    updatedAt: new Date(0).toISOString(),
-    photos: []
-  };
-}
-
-function normalizePhotosJson(input: PhotosJson): PhotosJson {
-  return {
-    version: typeof input.version === 'number' ? input.version : 0,
-    updatedAt: input.updatedAt ?? new Date(0).toISOString(),
-    photos: Array.isArray(input.photos) ? input.photos : []
-  };
+  await updateStoredPhotosJson(s3, bucketName, mutator);
 }
 
 function normalizedDimensions(metadata: sharp.Metadata): ImageDimensions {
@@ -680,10 +554,6 @@ function decodeS3Key(key: string): string {
   return decodeURIComponent(key.replace(/\+/g, ' '));
 }
 
-function stripBom(value: string): string {
-  return value.replace(/^\uFEFF/, '');
-}
-
 function humanizeTitle(id: string): string {
   return id
     .replace(/[-_]+/g, ' ')
@@ -716,14 +586,6 @@ function isSqsEvent(event: ImageEvent): event is SQSEvent {
   return event.Records[0] ? 'messageId' in event.Records[0] : false;
 }
 
-function isConditionalWriteFailure(error: unknown): boolean {
-  return hasErrorName(error, 'PreconditionFailed') || hasErrorName(error, 'ConditionalRequestConflict');
-}
-
-function hasErrorName(error: unknown, name: string): boolean {
-  return typeof error === 'object' && error !== null && 'name' in error && error.name === name;
-}
-
 function positiveNumber(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
 }
@@ -736,6 +598,11 @@ function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
 }
 
-function sleep(milliseconds: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+function requiredEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`Missing ${name} environment variable.`);
+  }
+
+  return value;
 }

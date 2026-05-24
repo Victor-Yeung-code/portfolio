@@ -51,6 +51,45 @@ $Npm = Resolve-Npm
 $env:Path = "$(Split-Path -Parent $Npm);$env:Path"
 $env:ASTRO_TELEMETRY_DISABLED = '1'
 
+function Import-EnvFile {
+  param(
+    [string] $Path
+  )
+
+  if (-not (Test-Path -LiteralPath $Path)) {
+    return
+  }
+
+  foreach ($line in Get-Content -LiteralPath $Path) {
+    $trimmed = $line.Trim()
+    if (-not $trimmed -or $trimmed.StartsWith('#')) {
+      continue
+    }
+
+    $index = $trimmed.IndexOf('=')
+    if ($index -le 0) {
+      continue
+    }
+
+    $name = $trimmed.Substring(0, $index).Trim()
+    $value = $trimmed.Substring($index + 1).Trim()
+
+    if (($value.StartsWith('"') -and $value.EndsWith('"')) -or ($value.StartsWith("'") -and $value.EndsWith("'"))) {
+      $value = $value.Substring(1, $value.Length - 2)
+    }
+
+    if (-not [Environment]::GetEnvironmentVariable($name, 'Process')) {
+      [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+    }
+  }
+}
+
+function Assert-AdminCredentials {
+  if (-not $env:ADMIN_USERNAME -or -not $env:ADMIN_PASSWORD) {
+    throw 'Set ADMIN_USERNAME and ADMIN_PASSWORD in infra\.env or the current shell before deploying M4.'
+  }
+}
+
 function Invoke-Aws {
   param(
     [Parameter(ValueFromRemainingArguments = $true)]
@@ -118,6 +157,9 @@ function Get-StackOutput {
 
   return $match.OutputValue
 }
+
+Import-EnvFile (Join-Path $InfraRoot '.env')
+Assert-AdminCredentials
 
 Write-Host 'Resolving AWS account'
 $accountId = & $Aws sts get-caller-identity --profile $Profile --query Account --output text

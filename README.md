@@ -92,7 +92,29 @@ $fn = aws cloudformation describe-stacks `
 aws lambda invoke --function-name $fn .\.cache\republish-output.json
 ```
 
-The trigger lists `originals/`, fans out one SQS message per photo, and creates a CloudFront invalidation for `/photos/*` and `/data/photos.json`.
+The trigger lists `originals/` and fans out one SQS message per photo. In M4, the admin UI polls queue depth and creates the CloudFront invalidation after the reprocess queue drains.
+
+## M4 Admin UI
+
+The admin interface is served at:
+
+- https://victor-yeung.com/admin/
+
+M4 adds:
+
+- CloudFront Basic Auth for `/admin*` and `/api/admin*`
+- Direct API Gateway bypass protection with a private CloudFront origin header
+- React admin island for uploading originals, editing metadata, soft-delete/restore/purge, watermark settings, preview, and republish
+- S3 presigned uploads for photos and PNG watermarks
+
+Set local admin credentials before deploying:
+
+```powershell
+Copy-Item .\infra\.env.example .\infra\.env
+# edit ADMIN_USERNAME and ADMIN_PASSWORD locally
+```
+
+`infra/.env` is ignored by git.
 
 ## Analytics
 

@@ -1,6 +1,8 @@
 import * as cdk from 'aws-cdk-lib';
 import { CfnOutput, Duration, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
+import * as apigwv2 from 'aws-cdk-lib/aws-apigatewayv2';
+import * as apigwv2Integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as iam from 'aws-cdk-lib/aws-iam';
@@ -12,6 +14,7 @@ import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as s3n from 'aws-cdk-lib/aws-s3-notifications';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import { Construct } from 'constructs';
+import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,12 +26,21 @@ const DOMAIN_NAME = 'victor-yeung.com';
 const WWW_DOMAIN_NAME = `www.${DOMAIN_NAME}`;
 const CLOUDFRONT_HOSTED_ZONE_ID = 'Z2FDTNDATAQYW2';
 const HOSTED_ZONE_ID = 'Z0659489BL36QJD9CF0F';
+const CACHE_POLICY_CACHING_DISABLED_ID = '4135ea2d-6df8-44a3-9df3-4b5a84be39ad';
+const ORIGIN_REQUEST_POLICY_ALL_VIEWER_EXCEPT_HOST_ID = 'b689b0a8-53d0-40ab-baf2-68738e2966ac';
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const infraRoot = join(currentDir, '..');
 
 export class VictorPortfolioFoundationStack extends Stack {
   constructor(scope: Construct, id: string, props: VictorPortfolioFoundationStackProps) {
     super(scope, id, props);
+
+    const adminUsername = requireAdminEnv('ADMIN_USERNAME');
+    const adminPassword = requireAdminEnv('ADMIN_PASSWORD');
+    const adminBasicAuthHeader = `Basic ${Buffer.from(`${adminUsername}:${adminPassword}`).toString('base64')}`;
+    const adminOriginSecret = createHash('sha256')
+      .update(`${DOMAIN_NAME}:${adminBasicAuthHeader}`)
+      .digest('hex');
 
     const siteBucket = new s3.Bucket(this, 'SiteBucket', {
       bucketName: 'victor-yeung-site',
@@ -42,6 +54,15 @@ export class VictorPortfolioFoundationStack extends Stack {
     const photosBucket = new s3.Bucket(this, 'PhotosBucket', {
       bucketName: 'victor-yeung-photos',
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
+      cors: [
+        {
+          allowedHeaders: ['*'],
+          allowedMethods: [s3.HttpMethods.PUT],
+          allowedOrigins: [`https://${DOMAIN_NAME}`],
+          exposedHeaders: ['ETag'],
+          maxAge: 300
+        }
+      ],
       encryption: s3.BucketEncryption.S3_MANAGED,
       enforceSSL: true,
       versioned: true,
@@ -50,35 +71,43 @@ export class VictorPortfolioFoundationStack extends Stack {
 
     const redirectWwwFunction = new cloudfront.Function(this, 'RedirectWwwFunction', {
       code: cloudfront.FunctionCode.fromInline(`
+function queryString(request) {
+  var query = '';
+  var querystring = request.querystring || {};
+  var keys = Object.keys(querystring);
+
+  if (keys.length > 0) {
+    query = '?' + keys.map(function(key) {
+      var item = querystring[key];
+      if (item.multiValue) {
+        return item.multiValue.map(function(value) {
+          return key + '=' + value.value;
+        }).join('&');
+      }
+      return key + '=' + item.value;
+    }).join('&');
+  }
+
+  return query;
+}
+
+function redirectToApex(request) {
+  return {
+    statusCode: 301,
+    statusDescription: 'Moved Permanently',
+    headers: {
+      location: { value: 'https://${DOMAIN_NAME}' + request.uri + queryString(request) },
+      'cache-control': { value: 'max-age=3600' }
+    }
+  };
+}
+
 function handler(event) {
   var request = event.request;
   var host = request.headers.host && request.headers.host.value;
 
   if (host === '${WWW_DOMAIN_NAME}') {
-    var query = '';
-    var querystring = request.querystring || {};
-    var keys = Object.keys(querystring);
-
-    if (keys.length > 0) {
-      query = '?' + keys.map(function(key) {
-        var item = querystring[key];
-        if (item.multiValue) {
-          return item.multiValue.map(function(value) {
-            return key + '=' + value.value;
-          }).join('&');
-        }
-        return key + '=' + item.value;
-      }).join('&');
-    }
-
-    return {
-      statusCode: 301,
-      statusDescription: 'Moved Permanently',
-      headers: {
-        location: { value: 'https://${DOMAIN_NAME}' + request.uri + query },
-        'cache-control': { value: 'max-age=3600' }
-      }
-    };
+    return redirectToApex(request);
   }
 
   return request;
@@ -88,11 +117,111 @@ function handler(event) {
 
     const rewritePhotosFunction = new cloudfront.Function(this, 'RewritePhotosFunction', {
       code: cloudfront.FunctionCode.fromInline(`
+function queryString(request) {
+  var query = '';
+  var querystring = request.querystring || {};
+  var keys = Object.keys(querystring);
+
+  if (keys.length > 0) {
+    query = '?' + keys.map(function(key) {
+      var item = querystring[key];
+      if (item.multiValue) {
+        return item.multiValue.map(function(value) {
+          return key + '=' + value.value;
+        }).join('&');
+      }
+      return key + '=' + item.value;
+    }).join('&');
+  }
+
+  return query;
+}
+
 function handler(event) {
   var request = event.request;
+  var host = request.headers.host && request.headers.host.value;
+
+  if (host === '${WWW_DOMAIN_NAME}') {
+    return {
+      statusCode: 301,
+      statusDescription: 'Moved Permanently',
+      headers: {
+        location: { value: 'https://${DOMAIN_NAME}' + request.uri + queryString(request) },
+        'cache-control': { value: 'max-age=3600' }
+      }
+    };
+  }
 
   if (request.uri.indexOf('/photos/') === 0) {
     request.uri = request.uri.slice('/photos'.length);
+  }
+
+  return request;
+}
+`)
+    });
+
+    const adminBasicAuthFunction = new cloudfront.Function(this, 'AdminBasicAuthFunction', {
+      code: cloudfront.FunctionCode.fromInline(`
+function queryString(request) {
+  var query = '';
+  var querystring = request.querystring || {};
+  var keys = Object.keys(querystring);
+
+  if (keys.length > 0) {
+    query = '?' + keys.map(function(key) {
+      var item = querystring[key];
+      if (item.multiValue) {
+        return item.multiValue.map(function(value) {
+          return key + '=' + value.value;
+        }).join('&');
+      }
+      return key + '=' + item.value;
+    }).join('&');
+  }
+
+  return query;
+}
+
+function redirectToApex(request) {
+  return {
+    statusCode: 301,
+    statusDescription: 'Moved Permanently',
+    headers: {
+      location: { value: 'https://${DOMAIN_NAME}' + request.uri + queryString(request) },
+      'cache-control': { value: 'max-age=3600' }
+    }
+  };
+}
+
+function isAdminRequest(uri) {
+  return uri === '/admin' || uri.indexOf('/admin/') === 0 || uri === '/api/admin' || uri.indexOf('/api/admin/') === 0;
+}
+
+function handler(event) {
+  var request = event.request;
+  var host = request.headers.host && request.headers.host.value;
+
+  if (host === '${WWW_DOMAIN_NAME}') {
+    return redirectToApex(request);
+  }
+
+  if (isAdminRequest(request.uri)) {
+    var auth = request.headers.authorization && request.headers.authorization.value;
+    if (auth !== ${JSON.stringify(adminBasicAuthHeader)}) {
+      return {
+        statusCode: 401,
+        statusDescription: 'Unauthorized',
+        headers: {
+          'cache-control': { value: 'no-store' },
+          'www-authenticate': { value: 'Basic realm="Victor Admin"' }
+        }
+      };
+    }
+  }
+
+  if (request.uri === '/admin' || request.uri === '/admin/') {
+    request.uri = '/admin/index.html';
   }
 
   return request;
@@ -143,115 +272,6 @@ function handler(event) {
         }
       }
     });
-
-    const distribution = new cloudfront.CfnDistribution(this, 'Distribution', {
-      distributionConfig: {
-        aliases: [DOMAIN_NAME, WWW_DOMAIN_NAME],
-        comment: 'Victor Yeung portfolio',
-        customErrorResponses: [
-          {
-            errorCode: 403,
-            errorCachingMinTtl: 60,
-            responseCode: 404,
-            responsePagePath: '/404.html'
-          },
-          {
-            errorCode: 404,
-            errorCachingMinTtl: 60,
-            responseCode: 404,
-            responsePagePath: '/404.html'
-          }
-        ],
-        defaultCacheBehavior: {
-          allowedMethods: ['GET', 'HEAD', 'OPTIONS'],
-          cachedMethods: ['GET', 'HEAD', 'OPTIONS'],
-          cachePolicyId: staticCachePolicy.ref,
-          compress: true,
-          functionAssociations: [
-            {
-              eventType: 'viewer-request',
-              functionArn: redirectWwwFunction.functionArn
-            }
-          ],
-          targetOriginId: 'site-origin',
-          viewerProtocolPolicy: 'redirect-to-https'
-        },
-        defaultRootObject: 'index.html',
-        enabled: true,
-        httpVersion: 'http2and3',
-        ipv6Enabled: true,
-        origins: [
-          {
-            domainName: siteBucket.bucketRegionalDomainName,
-            id: 'site-origin',
-            originAccessControlId: originAccessControl.attrId,
-            s3OriginConfig: { originAccessIdentity: '' }
-          },
-          {
-            domainName: photosBucket.bucketRegionalDomainName,
-            id: 'photos-origin',
-            originAccessControlId: originAccessControl.attrId,
-            s3OriginConfig: { originAccessIdentity: '' }
-          }
-        ],
-        priceClass: 'PriceClass_100',
-        viewerCertificate: {
-          acmCertificateArn: props.certificate.certificateArn,
-          minimumProtocolVersion: 'TLSv1.2_2021',
-          sslSupportMethod: 'sni-only'
-        },
-        cacheBehaviors: [
-          {
-            pathPattern: '/photos/*',
-            allowedMethods: ['GET', 'HEAD', 'OPTIONS'],
-            cachedMethods: ['GET', 'HEAD', 'OPTIONS'],
-            cachePolicyId: staticCachePolicy.ref,
-            compress: true,
-            functionAssociations: [
-              {
-                eventType: 'viewer-request',
-                functionArn: rewritePhotosFunction.functionArn
-              }
-            ],
-            targetOriginId: 'photos-origin',
-            viewerProtocolPolicy: 'redirect-to-https'
-          },
-          {
-            pathPattern: '/data/*',
-            allowedMethods: ['GET', 'HEAD', 'OPTIONS'],
-            cachedMethods: ['GET', 'HEAD', 'OPTIONS'],
-            cachePolicyId: dataCachePolicy.ref,
-            compress: true,
-            targetOriginId: 'photos-origin',
-            viewerProtocolPolicy: 'redirect-to-https'
-          }
-        ]
-      }
-    });
-
-    const distributionArn = cdk.Fn.join('', [
-      'arn:',
-      cdk.Aws.PARTITION,
-      ':cloudfront::',
-      cdk.Aws.ACCOUNT_ID,
-      ':distribution/',
-      distribution.ref
-    ]);
-
-    for (const bucket of [siteBucket, photosBucket]) {
-      bucket.addToResourcePolicy(
-        new iam.PolicyStatement({
-          actions: ['s3:GetObject'],
-          conditions: {
-            StringEquals: {
-              'AWS:SourceArn': distributionArn
-            }
-          },
-          principals: [new iam.ServicePrincipal('cloudfront.amazonaws.com')],
-          resources: [bucket.arnForObjects('*')]
-        })
-      );
-    }
 
     const imageReprocessDlq = new sqs.Queue(this, 'ImageReprocessDlq', {
       queueName: 'image-reprocess-dlq',
@@ -329,7 +349,6 @@ function handler(event) {
       },
       entry: join(infraRoot, 'lambda', 'republish-trigger', 'index.ts'),
       environment: {
-        DISTRIBUTION_ID: distribution.ref,
         PHOTOS_BUCKET: photosBucket.bucketName,
         QUEUE_URL: imageReprocessQueue.queueUrl
       },
@@ -350,12 +369,238 @@ function handler(event) {
         resources: [photosBucket.bucketArn]
       })
     );
-    republishTrigger.addToRolePolicy(
+
+    const adminApi = new NodejsFunction(this, 'AdminApi', {
+      architecture: lambda.Architecture.X86_64,
+      bundling: {
+        format: OutputFormat.CJS,
+        minify: true,
+        sourceMap: true,
+        target: 'node22'
+      },
+      entry: join(infraRoot, 'lambda', 'admin-api', 'index.ts'),
+      environment: {
+        ADMIN_ORIGIN_SECRET: adminOriginSecret,
+        DOMAIN_NAME,
+        PHOTOS_BUCKET: photosBucket.bucketName,
+        REPUBLISH_FUNCTION_NAME: republishTrigger.functionName,
+        REPROCESS_QUEUE_URL: imageReprocessQueue.queueUrl
+      },
+      memorySize: 512,
+      runtime: lambda.Runtime.NODEJS_22_X,
+      timeout: Duration.seconds(30)
+    });
+
+    photosBucket.grantReadWrite(adminApi);
+    republishTrigger.grantInvoke(adminApi);
+    adminApi.addToRolePolicy(
       new iam.PolicyStatement({
-        actions: ['cloudfront:CreateInvalidation'],
-        resources: [distributionArn]
+        actions: ['sqs:GetQueueAttributes'],
+        resources: [imageReprocessQueue.queueArn]
       })
     );
+    adminApi.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['cloudfront:CreateInvalidation', 'cloudfront:ListDistributions'],
+        resources: ['*']
+      })
+    );
+
+    const adminHttpApi = new apigwv2.HttpApi(this, 'AdminHttpApi', {
+      apiName: 'victor-portfolio-admin-api',
+      createDefaultStage: true
+    });
+    const adminHttpIntegration = new apigwv2Integrations.HttpLambdaIntegration(
+      'AdminHttpIntegration',
+      adminApi
+    );
+
+    adminHttpApi.addRoutes({
+      path: '/api/admin',
+      methods: [apigwv2.HttpMethod.ANY],
+      integration: adminHttpIntegration
+    });
+    adminHttpApi.addRoutes({
+      path: '/api/admin/{proxy+}',
+      methods: [apigwv2.HttpMethod.ANY],
+      integration: adminHttpIntegration
+    });
+
+    const apiOriginDomain = cdk.Fn.join('', [
+      adminHttpApi.apiId,
+      '.execute-api.',
+      cdk.Aws.REGION,
+      '.',
+      cdk.Aws.URL_SUFFIX
+    ]);
+
+    const apiCacheBehavior = {
+      allowedMethods: ['DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT'],
+      cachedMethods: ['GET', 'HEAD', 'OPTIONS'],
+      cachePolicyId: CACHE_POLICY_CACHING_DISABLED_ID,
+      compress: true,
+      functionAssociations: [
+        {
+          eventType: 'viewer-request',
+          functionArn: adminBasicAuthFunction.functionArn
+        }
+      ],
+      originRequestPolicyId: ORIGIN_REQUEST_POLICY_ALL_VIEWER_EXCEPT_HOST_ID,
+      targetOriginId: 'admin-api-origin',
+      viewerProtocolPolicy: 'redirect-to-https'
+    };
+
+    const distribution = new cloudfront.CfnDistribution(this, 'Distribution', {
+      distributionConfig: {
+        aliases: [DOMAIN_NAME, WWW_DOMAIN_NAME],
+        comment: 'Victor Yeung portfolio',
+        customErrorResponses: [
+          {
+            errorCode: 403,
+            errorCachingMinTtl: 60,
+            responseCode: 404,
+            responsePagePath: '/404.html'
+          },
+          {
+            errorCode: 404,
+            errorCachingMinTtl: 60,
+            responseCode: 404,
+            responsePagePath: '/404.html'
+          }
+        ],
+        defaultCacheBehavior: {
+          allowedMethods: ['GET', 'HEAD', 'OPTIONS'],
+          cachedMethods: ['GET', 'HEAD', 'OPTIONS'],
+          cachePolicyId: staticCachePolicy.ref,
+          compress: true,
+          functionAssociations: [
+            {
+              eventType: 'viewer-request',
+              functionArn: redirectWwwFunction.functionArn
+            }
+          ],
+          targetOriginId: 'site-origin',
+          viewerProtocolPolicy: 'redirect-to-https'
+        },
+        defaultRootObject: 'index.html',
+        enabled: true,
+        httpVersion: 'http2and3',
+        ipv6Enabled: true,
+        origins: [
+          {
+            domainName: siteBucket.bucketRegionalDomainName,
+            id: 'site-origin',
+            originAccessControlId: originAccessControl.attrId,
+            s3OriginConfig: { originAccessIdentity: '' }
+          },
+          {
+            domainName: photosBucket.bucketRegionalDomainName,
+            id: 'photos-origin',
+            originAccessControlId: originAccessControl.attrId,
+            s3OriginConfig: { originAccessIdentity: '' }
+          },
+          {
+            customOriginConfig: {
+              originProtocolPolicy: 'https-only',
+              originSslProtocols: ['TLSv1.2']
+            },
+            domainName: apiOriginDomain,
+            id: 'admin-api-origin',
+            originCustomHeaders: [
+              {
+                headerName: 'x-admin-origin-secret',
+                headerValue: adminOriginSecret
+              }
+            ]
+          }
+        ],
+        priceClass: 'PriceClass_100',
+        viewerCertificate: {
+          acmCertificateArn: props.certificate.certificateArn,
+          minimumProtocolVersion: 'TLSv1.2_2021',
+          sslSupportMethod: 'sni-only'
+        },
+        cacheBehaviors: [
+          {
+            pathPattern: '/api/admin',
+            ...apiCacheBehavior
+          },
+          {
+            pathPattern: '/api/admin/*',
+            ...apiCacheBehavior
+          },
+          {
+            pathPattern: '/admin*',
+            allowedMethods: ['GET', 'HEAD', 'OPTIONS'],
+            cachedMethods: ['GET', 'HEAD', 'OPTIONS'],
+            cachePolicyId: staticCachePolicy.ref,
+            compress: true,
+            functionAssociations: [
+              {
+                eventType: 'viewer-request',
+                functionArn: adminBasicAuthFunction.functionArn
+              }
+            ],
+            targetOriginId: 'site-origin',
+            viewerProtocolPolicy: 'redirect-to-https'
+          },
+          {
+            pathPattern: '/photos/*',
+            allowedMethods: ['GET', 'HEAD', 'OPTIONS'],
+            cachedMethods: ['GET', 'HEAD', 'OPTIONS'],
+            cachePolicyId: staticCachePolicy.ref,
+            compress: true,
+            functionAssociations: [
+              {
+                eventType: 'viewer-request',
+                functionArn: rewritePhotosFunction.functionArn
+              }
+            ],
+            targetOriginId: 'photos-origin',
+            viewerProtocolPolicy: 'redirect-to-https'
+          },
+          {
+            pathPattern: '/data/*',
+            allowedMethods: ['GET', 'HEAD', 'OPTIONS'],
+            cachedMethods: ['GET', 'HEAD', 'OPTIONS'],
+            cachePolicyId: dataCachePolicy.ref,
+            compress: true,
+            functionAssociations: [
+              {
+                eventType: 'viewer-request',
+                functionArn: redirectWwwFunction.functionArn
+              }
+            ],
+            targetOriginId: 'photos-origin',
+            viewerProtocolPolicy: 'redirect-to-https'
+          }
+        ]
+      }
+    });
+
+    const distributionArn = cdk.Fn.join('', [
+      'arn:',
+      cdk.Aws.PARTITION,
+      ':cloudfront::',
+      cdk.Aws.ACCOUNT_ID,
+      ':distribution/',
+      distribution.ref
+    ]);
+
+    for (const bucket of [siteBucket, photosBucket]) {
+      bucket.addToResourcePolicy(
+        new iam.PolicyStatement({
+          actions: ['s3:GetObject'],
+          conditions: {
+            StringEquals: {
+              'AWS:SourceArn': distributionArn
+            }
+          },
+          principals: [new iam.ServicePrincipal('cloudfront.amazonaws.com')],
+          resources: [bucket.arnForObjects('*')]
+        })
+      );
+    }
 
     const zone = route53.HostedZone.fromHostedZoneAttributes(this, 'HostedZone', {
       hostedZoneId: HOSTED_ZONE_ID,
@@ -399,5 +644,15 @@ function handler(event) {
     new CfnOutput(this, 'ImageProcessorFunctionName', { value: imageProcessor.functionName });
     new CfnOutput(this, 'RepublishTriggerFunctionName', { value: republishTrigger.functionName });
     new CfnOutput(this, 'ImageReprocessQueueUrl', { value: imageReprocessQueue.queueUrl });
+    new CfnOutput(this, 'AdminHttpApiUrl', { value: adminHttpApi.apiEndpoint });
   }
+}
+
+function requireAdminEnv(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`Set ${name} before CDK synth/deploy. See infra/.env.example.`);
+  }
+
+  return value;
 }
