@@ -36,10 +36,6 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
       return jsonResponse(403, { error: 'Forbidden' });
     }
 
-    if (event.requestContext.http.method === 'OPTIONS') {
-      return { statusCode: 204, headers: noStoreHeaders() };
-    }
-
     return await route(event);
   } catch (error) {
     if (isHttpError(error)) {
@@ -53,6 +49,12 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
 
 async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> {
   const method = event.requestContext.http.method.toUpperCase();
+  assertSameOrigin(event);
+
+  if (method === 'OPTIONS') {
+    return { statusCode: 204, headers: noStoreHeaders() };
+  }
+
   const path = normalizePath(event.rawPath);
 
   if (method === 'GET' && path === '/api/admin/photos') {
@@ -414,6 +416,18 @@ function noStoreHeaders(): Record<string, string> {
 
 function isTrustedCloudFrontRequest(event: APIGatewayProxyEventV2): boolean {
   return headerValue(event, 'x-admin-origin-secret') === adminOriginSecret;
+}
+
+function assertSameOrigin(event: APIGatewayProxyEventV2): void {
+  const method = event.requestContext.http.method.toUpperCase();
+  if (method === 'GET' || method === 'HEAD') {
+    return;
+  }
+
+  const origin = headerValue(event, 'origin');
+  if (origin && origin !== `https://${domainName}`) {
+    throw httpError(403, 'Invalid origin.');
+  }
 }
 
 function headerValue(event: APIGatewayProxyEventV2, header: string): string | undefined {
