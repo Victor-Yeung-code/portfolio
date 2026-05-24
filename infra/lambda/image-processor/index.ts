@@ -324,9 +324,10 @@ async function renderWatermarkOverlay(
   image: ImageDimensions
 ): Promise<{ buffer: Buffer; left: number; top: number } | null> {
   const shortestSide = Math.max(1, Math.min(image.width, image.height));
+  const widthBasis = Math.max(1, image.width);
   const margin = Math.max(0, Math.round((config.marginPct / 100) * shortestSide));
   const maxOverlayWidth = Math.max(1, image.width - margin * 2);
-  const desiredWidth = Math.round((config.widthPct / 100) * shortestSide);
+  const desiredWidth = Math.round((config.widthPct / 100) * widthBasis);
   const targetWidth = clamp(desiredWidth, config.minWidthPx, Math.min(config.maxWidthPx, maxOverlayWidth));
 
   const buffer = await sharp(watermarkBuffer, { failOn: 'none' })

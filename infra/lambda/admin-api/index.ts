@@ -255,14 +255,28 @@ async function getWatermark(): Promise<{ config: WatermarkConfig | null; preview
       return { config: null };
     }
 
-    const previewUrl = await getSignedUrl(s3, new GetObjectCommand({ Bucket: photosBucket, Key: config.file }), {
-      expiresIn: 300
-    });
+    const previewUrl = await getWatermarkPreviewDataUrl(config.file);
 
     return { config, previewUrl };
   } catch (error) {
     if (hasErrorName(error, 'NoSuchKey')) {
       return { config: null };
+    }
+
+    throw error;
+  }
+}
+
+async function getWatermarkPreviewDataUrl(key: string): Promise<string | undefined> {
+  try {
+    const watermark = await s3.send(new GetObjectCommand({ Bucket: photosBucket, Key: key }));
+    const bytes = watermark.Body ? await watermark.Body.transformToByteArray() : new Uint8Array();
+    const contentType = watermark.ContentType ?? 'image/png';
+
+    return `data:${contentType};base64,${Buffer.from(bytes).toString('base64')}`;
+  } catch (error) {
+    if (hasErrorName(error, 'NoSuchKey')) {
+      return undefined;
     }
 
     throw error;

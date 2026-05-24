@@ -19,11 +19,20 @@ export function drawWatermarkPreview(
   config: WatermarkConfig | null
 ): void {
   const pixelRatio = window.devicePixelRatio || 1;
-  const displayWidth = Math.max(320, canvas.clientWidth);
-  const displayHeight = Math.max(220, Math.round(displayWidth * (sample.naturalHeight / sample.naturalWidth)));
+  const containerWidth = Math.max(1, canvas.parentElement?.clientWidth || canvas.clientWidth || 720);
+  const aspectRatio = sample.naturalWidth > 0 ? sample.naturalHeight / sample.naturalWidth : 0.65;
+  const maxDisplayHeight = Math.max(320, Math.min(window.innerHeight * 0.72, 820));
+  let displayWidth = containerWidth;
+  let displayHeight = Math.round(displayWidth * aspectRatio);
+
+  if (displayHeight > maxDisplayHeight) {
+    displayHeight = Math.round(maxDisplayHeight);
+    displayWidth = Math.min(containerWidth, Math.round(displayHeight / aspectRatio));
+  }
 
   canvas.width = Math.round(displayWidth * pixelRatio);
   canvas.height = Math.round(displayHeight * pixelRatio);
+  canvas.style.width = `${displayWidth}px`;
   canvas.style.height = `${displayHeight}px`;
 
   const context = canvas.getContext('2d');
@@ -57,8 +66,9 @@ export function computeWatermarkPlacement(
   config: Pick<WatermarkConfig, 'position' | 'marginPct' | 'widthPct' | 'minWidthPx' | 'maxWidthPx'>
 ): Placement {
   const shortestSide = Math.max(1, Math.min(image.width, image.height));
+  const widthBasis = Math.max(1, image.width);
   const margin = Math.max(0, Math.round((config.marginPct / 100) * shortestSide));
-  const desiredWidth = Math.round((config.widthPct / 100) * shortestSide);
+  const desiredWidth = Math.round((config.widthPct / 100) * widthBasis);
   const width = clamp(desiredWidth, config.minWidthPx, Math.min(config.maxWidthPx, image.width - margin * 2));
   const scale = watermark.width > 0 ? width / watermark.width : 1;
   const height = Math.max(1, Math.round(watermark.height * scale));

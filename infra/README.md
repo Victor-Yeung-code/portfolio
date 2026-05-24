@@ -49,7 +49,7 @@ Expected config:
 }
 ```
 
-The watermark width and margin are calculated from the shorter side of each finished variant. The processor supports all nine anchors: `top-left`, `top-center`, `top-right`, `middle-left`, `middle-center`, `middle-right`, `bottom-left`, `bottom-center`, and `bottom-right`.
+The watermark width is calculated from each finished variant's width, which keeps the Width % slider visually consistent across landscape, portrait, and square images. Margin is calculated from the shorter side. The processor supports all nine anchors: `top-left`, `top-center`, `top-right`, `middle-left`, `middle-center`, `middle-right`, `bottom-left`, `bottom-center`, and `bottom-right`.
 
 `thumb` and `medium` are watermarked WebP display variants. `full/{id}.{ext}` is a full-resolution watermarked derivative in the original format, with image metadata preserved for downloads.
 

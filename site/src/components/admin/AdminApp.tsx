@@ -136,7 +136,7 @@ export default function AdminApp() {
             response={watermark}
             onChanged={(next) => {
               setWatermark(next);
-              setNotice('Watermark saved.');
+              setNotice('Watermark saved. Republish existing photos to apply it.');
             }}
             onError={setError}
           />
@@ -148,7 +148,12 @@ export default function AdminApp() {
           <div className="section-heading">
             <h2 id="republish-heading">Republish</h2>
           </div>
-          <RepublishPanel onError={setError} onDone={() => setNotice('Republish complete.')} />
+          <RepublishPanel
+            onError={setError}
+            onDone={() =>
+              setNotice('Republish finished. CloudFront cache refresh has started and may take a minute to show everywhere.')
+            }
+          />
         </section>
       )}
     </main>

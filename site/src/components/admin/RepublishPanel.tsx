@@ -36,8 +36,13 @@ export function RepublishPanel({ onDone, onError }: RepublishPanelProps) {
 
       setQueued(finalStatus.queued);
       setProcessing(finalStatus.processing);
+      setMessage('Refreshing CloudFront cache.');
       const invalidation = await adminApi.invalidatePhotos();
-      setMessage(invalidation.invalidationId ? `Invalidation ${invalidation.invalidationId} created.` : 'Invalidation created.');
+      setMessage(
+        invalidation.invalidationId
+          ? `Cache refresh ${invalidation.invalidationId} started.`
+          : 'Cache refresh started.'
+      );
       onDone();
     } catch (reason) {
       onError(reason instanceof Error ? reason.message : 'Republish failed.');

@@ -79,7 +79,7 @@ Example config:
 }
 ```
 
-When a watermark is configured, the processor applies it after resizing each variant. `thumb` and `medium` remain WebP. `full/{id}.{ext}` becomes a full-resolution watermarked derivative in the original format, with image metadata preserved for download. If `watermark.json` is missing or `opacity` is `0`, processing gracefully skips watermarking.
+When a watermark is configured, the processor applies it after resizing each variant. Watermark width is based on the finished variant width, while margin is based on the shorter side. `thumb` and `medium` remain WebP. `full/{id}.{ext}` becomes a full-resolution watermarked derivative in the original format, with image metadata preserved for download. If `watermark.json` is missing or `opacity` is `0`, processing gracefully skips watermarking.
 
 To republish all originals after changing watermark settings, invoke the republish trigger Lambda from the CloudFormation output:
 
