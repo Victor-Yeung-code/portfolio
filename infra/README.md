@@ -12,6 +12,21 @@ This milestone uses AWS CDK for the foundation and a manual PowerShell deploy sc
 - ACM certificate in `us-east-1`
 - Route 53 aliases for apex and `www`
 - `www.victor-yeung.com` redirects to `victor-yeung.com`
+- Image processor Lambda triggered by S3 changes under `originals/`
+- Sharp Lambda layer for WebP variant generation
+
+## Image Pipeline
+
+Upload originals to `s3://victor-yeung-photos/originals/{id}.{ext}`. Supported extensions are `jpg`, `jpeg`, `png`, `webp`, `tif`, `tiff`, and `avif`.
+
+For each uploaded original, the Lambda writes:
+
+- `thumb/{id}.webp`
+- `medium/{id}.webp`
+- `full/{id}.{ext}` as the original uploaded image
+- `data/photos.json`
+
+Deleting an original deletes the generated assets and removes the metadata entry. The Lambda updates `data/photos.json` with conditional S3 writes and retries on ETag conflicts.
 
 ## Deploy
 

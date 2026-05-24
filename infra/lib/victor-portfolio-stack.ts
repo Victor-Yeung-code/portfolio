@@ -3,9 +3,14 @@ import { CfnOutput, Duration, RemovalPolicy, Stack, StackProps } from 'aws-cdk-l
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as iam from 'aws-cdk-lib/aws-iam';
+import * as lambda from 'aws-cdk-lib/aws-lambda';
+import { NodejsFunction, OutputFormat } from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as s3 from 'aws-cdk-lib/aws-s3';
+import * as s3n from 'aws-cdk-lib/aws-s3-notifications';
 import { Construct } from 'constructs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 interface VictorPortfolioFoundationStackProps extends StackProps {
   certificate: acm.ICertificate;
@@ -15,6 +20,8 @@ const DOMAIN_NAME = 'victor-yeung.com';
 const WWW_DOMAIN_NAME = `www.${DOMAIN_NAME}`;
 const CLOUDFRONT_HOSTED_ZONE_ID = 'Z2FDTNDATAQYW2';
 const HOSTED_ZONE_ID = 'Z0659489BL36QJD9CF0F';
+const currentDir = dirname(fileURLToPath(import.meta.url));
+const infraRoot = join(currentDir, '..');
 
 export class VictorPortfolioFoundationStack extends Stack {
   constructor(scope: Construct, id: string, props: VictorPortfolioFoundationStackProps) {
@@ -69,6 +76,20 @@ function handler(event) {
         'cache-control': { value: 'max-age=3600' }
       }
     };
+  }
+
+  return request;
+}
+`)
+    });
+
+    const rewritePhotosFunction = new cloudfront.Function(this, 'RewritePhotosFunction', {
+      code: cloudfront.FunctionCode.fromInline(`
+function handler(event) {
+  var request = event.request;
+
+  if (request.uri.indexOf('/photos/') === 0) {
+    request.uri = request.uri.slice('/photos'.length);
   }
 
   return request;
@@ -183,6 +204,12 @@ function handler(event) {
             cachedMethods: ['GET', 'HEAD', 'OPTIONS'],
             cachePolicyId: staticCachePolicy.ref,
             compress: true,
+            functionAssociations: [
+              {
+                eventType: 'viewer-request',
+                functionArn: rewritePhotosFunction.functionArn
+              }
+            ],
             targetOriginId: 'photos-origin',
             viewerProtocolPolicy: 'redirect-to-https'
           },
@@ -223,6 +250,44 @@ function handler(event) {
       );
     }
 
+    const sharpLayer = new lambda.LayerVersion(this, 'SharpLayer', {
+      code: lambda.Code.fromAsset(join(infraRoot, 'layers', 'sharp')),
+      compatibleArchitectures: [lambda.Architecture.X86_64],
+      compatibleRuntimes: [lambda.Runtime.NODEJS_22_X],
+      description: 'Sharp image processing dependency for Victor Portfolio.'
+    });
+
+    const imageProcessor = new NodejsFunction(this, 'ImageProcessor', {
+      architecture: lambda.Architecture.X86_64,
+      bundling: {
+        externalModules: ['sharp'],
+        format: OutputFormat.CJS,
+        minify: true,
+        sourceMap: true,
+        target: 'node22'
+      },
+      entry: join(infraRoot, 'lambda', 'image-processor', 'index.ts'),
+      environment: {
+        PHOTOS_BUCKET: photosBucket.bucketName
+      },
+      layers: [sharpLayer],
+      memorySize: 3008,
+      runtime: lambda.Runtime.NODEJS_22_X,
+      timeout: Duration.seconds(30)
+    });
+
+    photosBucket.grantReadWrite(imageProcessor);
+    photosBucket.addEventNotification(
+      s3.EventType.OBJECT_CREATED_PUT,
+      new s3n.LambdaDestination(imageProcessor),
+      { prefix: 'originals/' }
+    );
+    photosBucket.addEventNotification(
+      s3.EventType.OBJECT_REMOVED,
+      new s3n.LambdaDestination(imageProcessor),
+      { prefix: 'originals/' }
+    );
+
     const zone = route53.HostedZone.fromHostedZoneAttributes(this, 'HostedZone', {
       hostedZoneId: HOSTED_ZONE_ID,
       zoneName: DOMAIN_NAME
@@ -262,5 +327,6 @@ function handler(event) {
     new CfnOutput(this, 'DistributionId', { value: distribution.ref });
     new CfnOutput(this, 'DistributionDomainName', { value: distribution.attrDomainName });
     new CfnOutput(this, 'CloudFrontHostedZoneId', { value: CLOUDFRONT_HOSTED_ZONE_ID });
+    new CfnOutput(this, 'ImageProcessorFunctionName', { value: imageProcessor.functionName });
   }
 }

@@ -44,6 +44,23 @@ M1 sets up:
 - `victor-yeung.com` as the canonical apex domain
 - `www.victor-yeung.com` redirecting to the apex domain
 
+## M2 Image Pipeline
+
+Upload originals to:
+
+```text
+s3://victor-yeung-photos/originals/{id}.{jpg|jpeg|png|webp|tif|tiff|avif}
+```
+
+The image processor Lambda generates:
+
+- `thumb/{id}.webp` at 400px wide
+- `medium/{id}.webp` at 1200px wide
+- `full/{id}.{ext}` as the original uploaded image for full-size downloads
+- `data/photos.json` with gallery metadata
+
+Deleting an object from `originals/` removes the generated assets and removes that photo from `data/photos.json`. Public image URLs use `/photos/...`; CloudFront rewrites that prefix to the private photos bucket keys.
+
 ## Analytics
 
 Google Analytics is opt-in via `PUBLIC_GA_ID`.

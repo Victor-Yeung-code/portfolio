@@ -4,18 +4,22 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc --noEmit",
-    "cdk": "cdk",
-    "synth": "cdk synth",
-    "deploy": "cdk deploy VictorPortfolioFoundationStack --require-approval never"
+    "build": "node ./node_modules/typescript/bin/tsc --noEmit",
+    "cdk": "node ./node_modules/aws-cdk/bin/cdk",
+    "synth": "node ./node_modules/aws-cdk/bin/cdk synth",
+    "deploy": "node ./node_modules/aws-cdk/bin/cdk deploy VictorPortfolioFoundationStack --require-approval never"
   },
   "dependencies": {
-    "aws-cdk-lib": "^2.178.1",
-    "constructs": "^10.4.2"
+    "@aws-sdk/client-s3": "^3.1053.0",
+    "aws-cdk-lib": "^2.257.0",
+    "constructs": "^10.4.2",
+    "sharp": "^0.33.5"
   },
   "devDependencies": {
+    "@types/aws-lambda": "^8.10.147",
     "@types/node": "^22.13.1",
-    "aws-cdk": "^2.178.1",
+    "aws-cdk": "^2.257.0",
+    "esbuild": "^0.24.2",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
   }
