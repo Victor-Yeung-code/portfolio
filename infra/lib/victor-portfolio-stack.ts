@@ -2,12 +2,15 @@ import * as cdk from 'aws-cdk-lib';
 import { CfnOutput, Duration, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
+import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
+import { SqsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import { NodejsFunction, OutputFormat } from 'aws-cdk-lib/aws-lambda-nodejs';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as s3n from 'aws-cdk-lib/aws-s3-notifications';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
 import { Construct } from 'constructs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -250,6 +253,32 @@ function handler(event) {
       );
     }
 
+    const imageReprocessDlq = new sqs.Queue(this, 'ImageReprocessDlq', {
+      queueName: 'image-reprocess-dlq',
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      retentionPeriod: Duration.days(14)
+    });
+
+    const imageReprocessQueue = new sqs.Queue(this, 'ImageReprocessQueue', {
+      queueName: 'image-reprocess-queue',
+      deadLetterQueue: {
+        maxReceiveCount: 3,
+        queue: imageReprocessDlq
+      },
+      encryption: sqs.QueueEncryption.SQS_MANAGED,
+      visibilityTimeout: Duration.seconds(90)
+    });
+
+    new cloudwatch.Alarm(this, 'ImageReprocessDlqDepthAlarm', {
+      alarmDescription: 'Image reprocess messages have moved to the dead-letter queue.',
+      comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
+      evaluationPeriods: 1,
+      metric: imageReprocessDlq.metricApproximateNumberOfMessagesVisible({
+        period: Duration.minutes(1)
+      }),
+      threshold: 1
+    });
+
     const sharpLayer = new lambda.LayerVersion(this, 'SharpLayer', {
       code: lambda.Code.fromAsset(join(infraRoot, 'layers', 'sharp')),
       compatibleArchitectures: [lambda.Architecture.X86_64],
@@ -277,6 +306,8 @@ function handler(event) {
     });
 
     photosBucket.grantReadWrite(imageProcessor);
+    imageReprocessQueue.grantConsumeMessages(imageProcessor);
+    imageProcessor.addEventSource(new SqsEventSource(imageReprocessQueue, { batchSize: 1 }));
     photosBucket.addEventNotification(
       s3.EventType.OBJECT_CREATED_PUT,
       new s3n.LambdaDestination(imageProcessor),
@@ -286,6 +317,44 @@ function handler(event) {
       s3.EventType.OBJECT_REMOVED,
       new s3n.LambdaDestination(imageProcessor),
       { prefix: 'originals/' }
+    );
+
+    const republishTrigger = new NodejsFunction(this, 'RepublishTrigger', {
+      architecture: lambda.Architecture.X86_64,
+      bundling: {
+        format: OutputFormat.CJS,
+        minify: true,
+        sourceMap: true,
+        target: 'node22'
+      },
+      entry: join(infraRoot, 'lambda', 'republish-trigger', 'index.ts'),
+      environment: {
+        DISTRIBUTION_ID: distribution.ref,
+        PHOTOS_BUCKET: photosBucket.bucketName,
+        QUEUE_URL: imageReprocessQueue.queueUrl
+      },
+      memorySize: 256,
+      runtime: lambda.Runtime.NODEJS_22_X,
+      timeout: Duration.seconds(60)
+    });
+
+    imageReprocessQueue.grantSendMessages(republishTrigger);
+    republishTrigger.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['s3:ListBucket'],
+        conditions: {
+          StringLike: {
+            's3:prefix': ['originals/', 'originals/*']
+          }
+        },
+        resources: [photosBucket.bucketArn]
+      })
+    );
+    republishTrigger.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['cloudfront:CreateInvalidation'],
+        resources: [distributionArn]
+      })
     );
 
     const zone = route53.HostedZone.fromHostedZoneAttributes(this, 'HostedZone', {
@@ -328,5 +397,7 @@ function handler(event) {
     new CfnOutput(this, 'DistributionDomainName', { value: distribution.attrDomainName });
     new CfnOutput(this, 'CloudFrontHostedZoneId', { value: CLOUDFRONT_HOSTED_ZONE_ID });
     new CfnOutput(this, 'ImageProcessorFunctionName', { value: imageProcessor.functionName });
+    new CfnOutput(this, 'RepublishTriggerFunctionName', { value: republishTrigger.functionName });
+    new CfnOutput(this, 'ImageReprocessQueueUrl', { value: imageReprocessQueue.queueUrl });
   }
 }

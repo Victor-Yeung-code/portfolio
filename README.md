@@ -61,6 +61,39 @@ The image processor Lambda generates:
 
 Deleting an object from `originals/` removes the generated assets and removes that photo from `data/photos.json`. Public image URLs use `/photos/...`; CloudFront rewrites that prefix to the private photos bucket keys.
 
+## M3 Watermark Pipeline
+
+Watermarking is controlled by `s3://victor-yeung-photos/data/watermark.json` and a PNG under `s3://victor-yeung-photos/watermarks/`.
+
+Example config:
+
+```json
+{
+  "file": "watermarks/current.png",
+  "position": "bottom-right",
+  "marginPct": 3,
+  "widthPct": 15,
+  "opacity": 0.7,
+  "minWidthPx": 40,
+  "maxWidthPx": 600
+}
+```
+
+When a watermark is configured, the processor applies it after resizing each variant. `thumb` and `medium` remain WebP. `full/{id}.{ext}` becomes a full-resolution watermarked derivative in the original format, with image metadata preserved for download. If `watermark.json` is missing or `opacity` is `0`, processing gracefully skips watermarking.
+
+To republish all originals after changing watermark settings, invoke the republish trigger Lambda from the CloudFormation output:
+
+```powershell
+$fn = aws cloudformation describe-stacks `
+  --stack-name VictorPortfolioFoundationStack `
+  --query "Stacks[0].Outputs[?OutputKey=='RepublishTriggerFunctionName'].OutputValue" `
+  --output text
+
+aws lambda invoke --function-name $fn .\.cache\republish-output.json
+```
+
+The trigger lists `originals/`, fans out one SQS message per photo, and creates a CloudFront invalidation for `/photos/*` and `/data/photos.json`.
+
 ## Analytics
 
 Google Analytics is opt-in via `PUBLIC_GA_ID`.

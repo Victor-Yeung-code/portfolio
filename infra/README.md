@@ -13,7 +13,9 @@ This milestone uses AWS CDK for the foundation and a manual PowerShell deploy sc
 - Route 53 aliases for apex and `www`
 - `www.victor-yeung.com` redirects to `victor-yeung.com`
 - Image processor Lambda triggered by S3 changes under `originals/`
-- Sharp Lambda layer for WebP variant generation
+- Sharp Lambda layer for WebP variant generation and watermark compositing
+- SQS queue and DLQ for republishing all image variants
+- Republish trigger Lambda for enqueueing all originals and invalidating CloudFront
 
 ## Image Pipeline
 
@@ -27,6 +29,41 @@ For each uploaded original, the Lambda writes:
 - `data/photos.json`
 
 Deleting an original deletes the generated assets and removes the metadata entry. The Lambda updates `data/photos.json` with conditional S3 writes and retries on ETag conflicts.
+
+## Watermark And Reprocess
+
+Watermarking is optional. If `data/watermark.json` does not exist, or if `opacity` is `0`, the image processor writes unwatermarked variants and logs no error.
+
+Expected config:
+
+```json
+{
+  "file": "watermarks/current.png",
+  "position": "bottom-right",
+  "marginPct": 3,
+  "widthPct": 15,
+  "opacity": 0.7,
+  "minWidthPx": 40,
+  "maxWidthPx": 600
+}
+```
+
+The watermark width and margin are calculated from the shorter side of each finished variant. The processor supports all nine anchors: `top-left`, `top-center`, `top-right`, `middle-left`, `middle-center`, `middle-right`, `bottom-left`, `bottom-center`, and `bottom-right`.
+
+`thumb` and `medium` are watermarked WebP display variants. `full/{id}.{ext}` is a full-resolution watermarked derivative in the original format, with image metadata preserved for downloads.
+
+After changing watermark settings, invoke the republish trigger:
+
+```powershell
+$fn = aws cloudformation describe-stacks `
+  --stack-name VictorPortfolioFoundationStack `
+  --query "Stacks[0].Outputs[?OutputKey=='RepublishTriggerFunctionName'].OutputValue" `
+  --output text
+
+aws lambda invoke --function-name $fn .\.cache\republish-output.json
+```
+
+The trigger paginates `originals/`, sends one SQS message per original, and invalidates `/photos/*` plus `/data/photos.json`. The image processor consumes the SQS queue with batch size `1`; failed messages are retried up to three receives before moving to `image-reprocess-dlq`.
 
 ## Deploy
 

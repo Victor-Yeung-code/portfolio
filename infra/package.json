@@ -10,7 +10,9 @@
     "deploy": "node ./node_modules/aws-cdk/bin/cdk deploy VictorPortfolioFoundationStack --require-approval never"
   },
   "dependencies": {
+    "@aws-sdk/client-cloudfront": "^3.1053.0",
     "@aws-sdk/client-s3": "^3.1053.0",
+    "@aws-sdk/client-sqs": "^3.1053.0",
     "aws-cdk-lib": "^2.257.0",
     "constructs": "^10.4.2",
     "sharp": "^0.33.5"
