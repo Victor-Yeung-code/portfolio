@@ -4,9 +4,10 @@ import {
   PutObjectCommand,
   S3Client
 } from '@aws-sdk/client-s3';
-import type { PhotosDocument, PhotosJson } from './types.js';
+import type { GalleryJson, GalleryPhotoEntry, PhotoEntry, PhotosDocument, PhotosJson } from './types.js';
 
-const photosJsonKey = 'data/photos.json';
+export const photosJsonKey = 'data/photos.json';
+export const galleryJsonKey = 'data/gallery.json';
 
 export async function updatePhotosJson(
   s3: S3Client,
@@ -32,6 +33,7 @@ export async function updatePhotosJson(
           ...(document.exists ? { IfMatch: document.etag } : { IfNoneMatch: '*' })
         })
       );
+      await writeGalleryJson(s3, bucketName, next);
       return;
     } catch (error) {
       if (isConditionalWriteFailure(error) && attempt < 5) {
@@ -80,6 +82,46 @@ export function normalizePhotosJson(input: PhotosJson): PhotosJson {
     version: typeof input.version === 'number' ? input.version : 0,
     updatedAt: input.updatedAt ?? new Date(0).toISOString(),
     photos: Array.isArray(input.photos) ? input.photos : []
+  };
+}
+
+export async function writeGalleryJson(s3: S3Client, bucketName: string, photos: PhotosJson): Promise<void> {
+  const gallery = toGalleryJson(photos);
+
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: bucketName,
+      Key: galleryJsonKey,
+      Body: JSON.stringify(gallery, null, 2),
+      CacheControl: 'public, max-age=60',
+      ContentType: 'application/json; charset=utf-8'
+    })
+  );
+}
+
+export function toGalleryJson(photos: PhotosJson): GalleryJson {
+  return {
+    version: photos.version,
+    updatedAt: photos.updatedAt,
+    photos: photos.photos
+      .filter((photo) => !photo.deleted)
+      .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id))
+      .map(toGalleryPhoto)
+  };
+}
+
+function toGalleryPhoto(photo: PhotoEntry): GalleryPhotoEntry {
+  return {
+    id: photo.id,
+    title: photo.title,
+    description: photo.description,
+    album: photo.album,
+    order: photo.order,
+    variants: photo.variants,
+    width: photo.width,
+    height: photo.height,
+    takenAt: photo.takenAt,
+    tags: photo.tags
   };
 }
 

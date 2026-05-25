@@ -1,4 +1,7 @@
 ---
+import { SiteFooter } from '../components/public/SiteFooter';
+import '../styles/public.css';
+
 interface Props {
   title?: string;
   description?: string;
@@ -13,6 +16,7 @@ const canonicalUrl = new URL(Astro.url.pathname, Astro.site);
 const gaId = import.meta.env.PUBLIC_GA_ID;
 const isAdminPage = Astro.url.pathname.startsWith('/admin');
 const loadGA = gaId && !isAdminPage;
+const currentPath = Astro.url.pathname;
 ---
 
 <!doctype html>
@@ -26,9 +30,12 @@ const loadGA = gaId && !isAdminPage;
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
+    <meta property="og:site_name" content="Victor Yeung" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content={canonicalUrl} />
     <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
     {
       loadGA && (
         <>
@@ -43,7 +50,28 @@ const loadGA = gaId && !isAdminPage;
       )
     }
   </head>
-  <body>
+  <body class={isAdminPage ? 'admin-page' : 'public-page'}>
+    {
+      !isAdminPage && (
+        <header class="site-header">
+          <a class="brand" href="/" aria-label="Victor Yeung home">
+            Victor Yeung
+          </a>
+          <nav aria-label="Primary navigation">
+            <a class={currentPath === '/' ? 'is-active' : ''} href="/">Gallery</a>
+            <a class={currentPath === '/about' ? 'is-active' : ''} href="/about">About</a>
+            <a class={currentPath === '/contact' ? 'is-active' : ''} href="/contact">Contact</a>
+          </nav>
+        </header>
+      )
+    }
     <slot />
+    {
+      !isAdminPage && (
+        <footer class="site-footer">
+          <SiteFooter client:load />
+        </footer>
+      )
+    }
   </body>
 </html>

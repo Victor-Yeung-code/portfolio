@@ -17,6 +17,9 @@ This milestone uses AWS CDK for the foundation and a manual PowerShell deploy sc
 - SQS queue and DLQ for republishing all image variants
 - Republish trigger Lambda for enqueueing all originals
 - Basic-auth protected admin UI and admin API behind CloudFront
+- Public contact API backed by SES
+- SNS email alerts for image reprocess DLQ failures
+- Security response headers on CloudFront behaviors
 
 ## Image Pipeline
 
@@ -27,9 +30,10 @@ For each uploaded original, the Lambda writes:
 - `thumb/{id}.webp`
 - `medium/{id}.webp`
 - `full/{id}.{ext}` as the original uploaded image
-- `data/photos.json`
+- `data/photos.json` for admin/internal metadata
+- `data/gallery.json` for public gallery metadata
 
-Deleting an original deletes the generated assets and removes the metadata entry. The Lambda updates `data/photos.json` with conditional S3 writes and retries on ETag conflicts.
+Deleting an original deletes the generated assets and removes the metadata entry. The Lambda updates `data/photos.json` with conditional S3 writes and retries on ETag conflicts, then writes a filtered `data/gallery.json` without soft-deleted entries or original S3 keys.
 
 ## Watermark And Reprocess
 
@@ -83,6 +87,12 @@ Copy-Item .\infra\.env.example .\infra\.env
 
 Do not commit `infra/.env`. The CloudFront Function protects `/admin*` and `/api/admin*`. The admin API also requires a private CloudFront origin header so the public API Gateway URL cannot bypass Basic Auth.
 
+## Public Site And Contact
+
+The public site reads `data/gallery.json` and `data/site.json` at runtime through CloudFront. The `/data/*` behavior only exposes those two public JSON files; `data/photos.json` and `data/watermark.json` remain internal to S3/Lambda/admin APIs.
+
+The contact form posts to `/api/contact`. The Lambda sends mail through SES from `CONTACT_FROM_EMAIL` to `CONTACT_TO_EMAIL`. If `TURNSTILE_SECRET_KEY` is set, the Lambda requires Cloudflare Turnstile verification and checks that the returned hostname is `victor-yeung.com` or `www.victor-yeung.com`. Without that secret, Turnstile is skipped so launch can proceed before the Cloudflare account is ready.
+
 ## Deploy
 
 From the repo root:
@@ -97,8 +107,11 @@ The script expects:
 - Node.js 22+ with npm available
 - Existing Route 53 hosted zone `victor-yeung.com`
 - `ADMIN_USERNAME` and `ADMIN_PASSWORD` in `infra/.env` or the current shell
+- Optional `CONTACT_TO_EMAIL`, `CONTACT_FROM_EMAIL`, `ADMIN_ALERT_EMAIL`, and `TURNSTILE_SECRET_KEY` in `infra/.env`
 
 On this machine, the script also detects the local portable Node/npm under `tools/`.
+
+The deploy script seeds `data/site.json` if missing and regenerates `data/gallery.json` from `data/photos.json` on every deploy.
 
 ## Rollback
 

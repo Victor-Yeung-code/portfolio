@@ -62,6 +62,20 @@ export interface RepublishStatus {
   processing: number;
 }
 
+export interface SocialLink {
+  platform: string;
+  url: string;
+}
+
+export interface SiteConfig {
+  name: string;
+  tagline: string;
+  bio: string;
+  email: string;
+  social: SocialLink[];
+  footer: string;
+}
+
 export const watermarkPositions: WatermarkPosition[] = [
   'top-left',
   'top-center',

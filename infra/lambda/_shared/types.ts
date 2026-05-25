@@ -35,6 +35,14 @@ export interface PhotosJson {
   photos: PhotoEntry[];
 }
 
+export type GalleryPhotoEntry = Omit<PhotoEntry, 'originalKey' | 'createdAt' | 'updatedAt' | 'deleted' | 'deletedAt'>;
+
+export interface GalleryJson {
+  version: number;
+  updatedAt: string;
+  photos: GalleryPhotoEntry[];
+}
+
 export interface PhotosDocument {
   data: PhotosJson;
   etag?: string;
@@ -49,6 +57,20 @@ export interface WatermarkConfig {
   opacity: number;
   minWidthPx: number;
   maxWidthPx: number;
+}
+
+export interface SocialLink {
+  platform: string;
+  url: string;
+}
+
+export interface SiteConfig {
+  name: string;
+  tagline: string;
+  bio: string;
+  email: string;
+  social: SocialLink[];
+  footer: string;
 }
 
 export const watermarkPositions: WatermarkPosition[] = [

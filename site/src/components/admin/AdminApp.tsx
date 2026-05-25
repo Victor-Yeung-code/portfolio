@@ -3,11 +3,12 @@ import { adminApi } from './api';
 import { PhotoList } from './PhotoList';
 import { PhotoUpload } from './PhotoUpload';
 import { RepublishPanel } from './RepublishPanel';
-import type { PhotosJson, WatermarkResponse } from './types';
+import { SiteConfigPanel } from './SiteConfigPanel';
+import type { PhotosJson, SiteConfig, WatermarkResponse } from './types';
 import { WatermarkConfigPanel } from './WatermarkConfig';
 import './admin.css';
 
-type AdminTab = 'photos' | 'watermark' | 'republish';
+type AdminTab = 'photos' | 'watermark' | 'site' | 'republish';
 
 const emptyPhotos: PhotosJson = {
   version: 0,
@@ -15,9 +16,19 @@ const emptyPhotos: PhotosJson = {
   photos: []
 };
 
+const emptySite: SiteConfig = {
+  name: 'Victor Yeung',
+  tagline: 'Art & Photography',
+  bio: '',
+  email: 'victoryeung564@gmail.com',
+  social: [],
+  footer: 'Copyright 2026 Victor Yeung'
+};
+
 const tabs: Array<{ id: AdminTab; label: string }> = [
   { id: 'photos', label: 'Photos' },
   { id: 'watermark', label: 'Watermark' },
+  { id: 'site', label: 'Site Info' },
   { id: 'republish', label: 'Republish' }
 ];
 
@@ -25,6 +36,7 @@ export default function AdminApp() {
   const [activeTab, setActiveTab] = useState<AdminTab>('photos');
   const [photos, setPhotos] = useState<PhotosJson>(emptyPhotos);
   const [watermark, setWatermark] = useState<WatermarkResponse>({ config: null });
+  const [site, setSite] = useState<SiteConfig>(emptySite);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
@@ -34,9 +46,14 @@ export default function AdminApp() {
 
   const refresh = useCallback(async () => {
     setError('');
-    const [nextPhotos, nextWatermark] = await Promise.all([adminApi.getPhotos(), adminApi.getWatermark()]);
+    const [nextPhotos, nextWatermark, nextSite] = await Promise.all([
+      adminApi.getPhotos(),
+      adminApi.getWatermark(),
+      adminApi.getSite()
+    ]);
     setPhotos(nextPhotos);
     setWatermark(nextWatermark);
+    setSite(nextSite);
   }, []);
 
   useEffect(() => {
@@ -137,6 +154,22 @@ export default function AdminApp() {
             onChanged={(next) => {
               setWatermark(next);
               setNotice('Watermark saved. Republish existing photos to apply it.');
+            }}
+            onError={setError}
+          />
+        </section>
+      )}
+
+      {activeTab === 'site' && (
+        <section className="admin-section" aria-labelledby="site-heading">
+          <div className="section-heading">
+            <h2 id="site-heading">Site Info</h2>
+          </div>
+          <SiteConfigPanel
+            site={site}
+            onChanged={(next) => {
+              setSite(next);
+              setNotice('Site info saved. Public pages will refresh shortly.');
             }}
             onError={setError}
           />

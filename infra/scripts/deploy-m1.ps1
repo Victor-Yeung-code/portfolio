@@ -158,6 +158,136 @@ function Get-StackOutput {
   return $match.OutputValue
 }
 
+function Write-Utf8NoBom {
+  param(
+    [string] $Path,
+    [string] $Content
+  )
+
+  $encoding = New-Object System.Text.UTF8Encoding $false
+  [System.IO.File]::WriteAllText($Path, $Content, $encoding)
+}
+
+function Test-S3Object {
+  param(
+    [string] $Bucket,
+    [string] $Key
+  )
+
+  $previousErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    & $Aws s3api head-object --bucket $Bucket --key $Key --profile $Profile 1> $null 2> $null
+    return $LASTEXITCODE -eq 0
+  }
+  finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
+}
+
+function Convert-PhotosToGallery {
+  param(
+    [object] $PhotosDocument
+  )
+
+  $version = 0
+  if ($null -ne $PhotosDocument.version) {
+    $version = $PhotosDocument.version
+  }
+
+  $updatedAt = (Get-Date ([datetime]'1970-01-01T00:00:00Z') -Format o)
+  if ($PhotosDocument.updatedAt) {
+    $updatedAt = $PhotosDocument.updatedAt
+  }
+
+  $entries = @()
+  foreach ($photo in @($PhotosDocument.photos)) {
+    if ($photo.deleted -eq $true) {
+      continue
+    }
+
+    $entries += [pscustomobject][ordered]@{
+      id = $photo.id
+      title = $photo.title
+      description = $photo.description
+      album = $photo.album
+      order = $photo.order
+      variants = $photo.variants
+      width = $photo.width
+      height = $photo.height
+      takenAt = $photo.takenAt
+      tags = @($photo.tags)
+    }
+  }
+
+  $entries = @($entries | Sort-Object @{ Expression = 'order'; Ascending = $true }, @{ Expression = 'id'; Ascending = $true })
+
+  return [ordered]@{
+    version = $version
+    updatedAt = $updatedAt
+    photos = $entries
+  }
+}
+
+function Publish-PublicData {
+  param(
+    [string] $PhotosBucket
+  )
+
+  $cacheDir = Join-Path $RepoRoot '.cache'
+  New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
+
+  if (-not (Test-S3Object $PhotosBucket 'data/site.json')) {
+    Write-Host 'Seeding public site info'
+    $siteConfig = [ordered]@{
+      name = 'Victor Yeung'
+      tagline = 'Art & Photography'
+      bio = 'Victor Yeung is building a new photography portfolio. A fuller artist statement and biography will be added soon.'
+      email = 'victoryeung564@gmail.com'
+      social = @()
+      footer = 'Copyright 2026 Victor Yeung'
+    }
+    $siteConfigPath = Join-Path $cacheDir 'site.json'
+    Write-Utf8NoBom $siteConfigPath ($siteConfig | ConvertTo-Json -Depth 8)
+    Invoke-Aws s3 cp $siteConfigPath "s3://$PhotosBucket/data/site.json" `
+      --cache-control 'public, max-age=60' `
+      --content-type 'application/json; charset=utf-8' `
+      --profile $Profile
+  }
+
+  $photosJsonPath = Join-Path $cacheDir 'photos.json'
+  $galleryJsonPath = Join-Path $cacheDir 'gallery.json'
+  $previousErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try {
+    & $Aws s3 cp "s3://$PhotosBucket/data/photos.json" $photosJsonPath --profile $Profile 1> $null 2> $null
+    $photosJsonDownloaded = $LASTEXITCODE -eq 0
+  }
+  finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
+
+  if ($photosJsonDownloaded -and (Test-Path -LiteralPath $photosJsonPath)) {
+    Write-Host 'Publishing public gallery metadata'
+    $photosDocument = Get-Content -LiteralPath $photosJsonPath -Raw | ConvertFrom-Json
+    $gallery = Convert-PhotosToGallery $photosDocument
+  }
+  else {
+    Write-Host 'Publishing empty public gallery metadata'
+    $gallery = [ordered]@{
+      version = 0
+      updatedAt = (Get-Date ([datetime]'1970-01-01T00:00:00Z') -Format o)
+      photos = @()
+    }
+  }
+
+  Write-Utf8NoBom $galleryJsonPath ($gallery | ConvertTo-Json -Depth 12)
+  Invoke-Aws s3 cp $galleryJsonPath "s3://$PhotosBucket/data/gallery.json" `
+    --cache-control 'public, max-age=60' `
+    --content-type 'application/json; charset=utf-8' `
+    --profile $Profile
+}
+
 Import-EnvFile (Join-Path $InfraRoot '.env')
 Assert-AdminCredentials
 
@@ -204,8 +334,11 @@ if ($LASTEXITCODE -ne 0) {
 
 $outputs = $outputsJson | ConvertFrom-Json
 $siteBucket = Get-StackOutput $outputs 'SiteBucketName'
+$photosBucket = Get-StackOutput $outputs 'PhotosBucketName'
 $distributionId = Get-StackOutput $outputs 'DistributionId'
 $distributionDomainName = Get-StackOutput $outputs 'DistributionDomainName'
+
+Publish-PublicData $photosBucket
 
 Write-Host "Uploading site to s3://$siteBucket"
 Invoke-Aws s3 sync (Join-Path $RepoRoot 'site\dist') "s3://$siteBucket" `

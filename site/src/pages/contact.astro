@@ -1,0 +1,22 @@
+---
+import { ContactForm } from '../components/public/ContactForm';
+import BaseLayout from '../layouts/BaseLayout.astro';
+
+const turnstileSiteKey = import.meta.env.PUBLIC_TURNSTILE_SITEKEY;
+---
+
+<BaseLayout
+  title="Contact | Victor Yeung"
+  description="Contact Victor Yeung about the photography portfolio."
+>
+  <main class="public-main">
+    <section class="content-panel" aria-labelledby="contact-title">
+      <p class="eyebrow">Contact</p>
+      <h1 id="contact-title">Get in touch</h1>
+      <div class="prose">
+        <p>Use the form for portfolio inquiries, print questions, or collaboration notes.</p>
+      </div>
+      <ContactForm client:load turnstileSiteKey={turnstileSiteKey} />
+    </section>
+  </main>
+</BaseLayout>

@@ -1,0 +1,13 @@
+---
+import { AboutContent } from '../components/public/AboutContent';
+import BaseLayout from '../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+  title="About | Victor Yeung"
+  description="About Victor Yeung and the photography portfolio."
+>
+  <main class="public-main">
+    <AboutContent client:load />
+  </main>
+</BaseLayout>

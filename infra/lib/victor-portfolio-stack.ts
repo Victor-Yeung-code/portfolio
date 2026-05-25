@@ -5,13 +5,18 @@ import * as apigwv2 from 'aws-cdk-lib/aws-apigatewayv2';
 import * as apigwv2Integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
+import * as cloudwatchActions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import { SqsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import { NodejsFunction, OutputFormat } from 'aws-cdk-lib/aws-lambda-nodejs';
+import * as logs from 'aws-cdk-lib/aws-logs';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as s3n from 'aws-cdk-lib/aws-s3-notifications';
+import * as ses from 'aws-cdk-lib/aws-ses';
+import * as sns from 'aws-cdk-lib/aws-sns';
+import * as subscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import { Construct } from 'constructs';
 import { createHash } from 'node:crypto';
@@ -28,6 +33,7 @@ const CLOUDFRONT_HOSTED_ZONE_ID = 'Z2FDTNDATAQYW2';
 const HOSTED_ZONE_ID = 'Z0659489BL36QJD9CF0F';
 const CACHE_POLICY_CACHING_DISABLED_ID = '4135ea2d-6df8-44a3-9df3-4b5a84be39ad';
 const ORIGIN_REQUEST_POLICY_ALL_VIEWER_EXCEPT_HOST_ID = 'b689b0a8-53d0-40ab-baf2-68738e2966ac';
+const DEFAULT_CONTACT_EMAIL = 'victoryeung564@gmail.com';
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const infraRoot = join(currentDir, '..');
 
@@ -41,6 +47,10 @@ export class VictorPortfolioFoundationStack extends Stack {
     const adminOriginSecret = createHash('sha256')
       .update(`${DOMAIN_NAME}:${adminBasicAuthHeader}`)
       .digest('hex');
+    const contactToEmail = process.env.CONTACT_TO_EMAIL ?? DEFAULT_CONTACT_EMAIL;
+    const contactFromEmail = process.env.CONTACT_FROM_EMAIL ?? contactToEmail;
+    const adminAlertEmail = process.env.ADMIN_ALERT_EMAIL ?? contactToEmail;
+    const turnstileSecretKey = process.env.TURNSTILE_SECRET_KEY ?? '';
 
     const siteBucket = new s3.Bucket(this, 'SiteBucket', {
       bucketName: 'victor-yeung-site',
@@ -110,6 +120,16 @@ function handler(event) {
     return redirectToApex(request);
   }
 
+  if (request.uri === '/') {
+    request.uri = '/index.html';
+  } else if (request.uri.indexOf('/api/') !== 0 && request.uri.indexOf('.') === -1) {
+    if (request.uri.slice(-1) === '/') {
+      request.uri = request.uri + 'index.html';
+    } else {
+      request.uri = request.uri + '/index.html';
+    }
+  }
+
   return request;
 }
 `)
@@ -154,6 +174,62 @@ function handler(event) {
 
   if (request.uri.indexOf('/photos/') === 0) {
     request.uri = request.uri.slice('/photos'.length);
+  }
+
+  return request;
+}
+`)
+    });
+
+    const publicDataFunction = new cloudfront.Function(this, 'PublicDataFunction', {
+      code: cloudfront.FunctionCode.fromInline(`
+function queryString(request) {
+  var query = '';
+  var querystring = request.querystring || {};
+  var keys = Object.keys(querystring);
+
+  if (keys.length > 0) {
+    query = '?' + keys.map(function(key) {
+      var item = querystring[key];
+      if (item.multiValue) {
+        return item.multiValue.map(function(value) {
+          return key + '=' + value.value;
+        }).join('&');
+      }
+      return key + '=' + item.value;
+    }).join('&');
+  }
+
+  return query;
+}
+
+function redirectToApex(request) {
+  return {
+    statusCode: 301,
+    statusDescription: 'Moved Permanently',
+    headers: {
+      location: { value: 'https://${DOMAIN_NAME}' + request.uri + queryString(request) },
+      'cache-control': { value: 'max-age=3600' }
+    }
+  };
+}
+
+function handler(event) {
+  var request = event.request;
+  var host = request.headers.host && request.headers.host.value;
+
+  if (host === '${WWW_DOMAIN_NAME}') {
+    return redirectToApex(request);
+  }
+
+  if (request.uri !== '/data/gallery.json' && request.uri !== '/data/site.json') {
+    return {
+      statusCode: 404,
+      statusDescription: 'Not Found',
+      headers: {
+        'cache-control': { value: 'no-store' }
+      }
+    };
   }
 
   return request;
@@ -273,6 +349,32 @@ function handler(event) {
       }
     });
 
+    const securityHeadersPolicy = new cloudfront.CfnResponseHeadersPolicy(this, 'SecurityHeadersPolicy', {
+      responseHeadersPolicyConfig: {
+        name: 'victor-portfolio-security-headers',
+        comment: 'Security headers for Victor Yeung portfolio responses.',
+        securityHeadersConfig: {
+          contentTypeOptions: { override: true },
+          frameOptions: { frameOption: 'DENY', override: true },
+          referrerPolicy: { referrerPolicy: 'strict-origin-when-cross-origin', override: true },
+          strictTransportSecurity: {
+            accessControlMaxAgeSec: Duration.days(365).toSeconds(),
+            includeSubdomains: true,
+            override: true
+          }
+        },
+        customHeadersConfig: {
+          items: [
+            {
+              header: 'Permissions-Policy',
+              override: true,
+              value: 'camera=(), microphone=(), geolocation=()'
+            }
+          ]
+        }
+      }
+    });
+
     const imageReprocessDlq = new sqs.Queue(this, 'ImageReprocessDlq', {
       queueName: 'image-reprocess-dlq',
       encryption: sqs.QueueEncryption.SQS_MANAGED,
@@ -289,7 +391,13 @@ function handler(event) {
       visibilityTimeout: Duration.seconds(90)
     });
 
-    new cloudwatch.Alarm(this, 'ImageReprocessDlqDepthAlarm', {
+    const alertTopic = new sns.Topic(this, 'AdminAlertTopic', {
+      displayName: 'Victor Portfolio alerts',
+      topicName: 'victor-portfolio-alerts'
+    });
+    alertTopic.addSubscription(new subscriptions.EmailSubscription(adminAlertEmail));
+
+    const imageReprocessDlqAlarm = new cloudwatch.Alarm(this, 'ImageReprocessDlqDepthAlarm', {
       alarmDescription: 'Image reprocess messages have moved to the dead-letter queue.',
       comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
       evaluationPeriods: 1,
@@ -298,6 +406,7 @@ function handler(event) {
       }),
       threshold: 1
     });
+    imageReprocessDlqAlarm.addAlarmAction(new cloudwatchActions.SnsAction(alertTopic));
 
     const sharpLayer = new lambda.LayerVersion(this, 'SharpLayer', {
       code: lambda.Code.fromAsset(join(infraRoot, 'layers', 'sharp')),
@@ -320,6 +429,7 @@ function handler(event) {
         PHOTOS_BUCKET: photosBucket.bucketName
       },
       layers: [sharpLayer],
+      logRetention: logs.RetentionDays.ONE_MONTH,
       memorySize: 3008,
       runtime: lambda.Runtime.NODEJS_22_X,
       timeout: Duration.seconds(30)
@@ -352,6 +462,7 @@ function handler(event) {
         PHOTOS_BUCKET: photosBucket.bucketName,
         QUEUE_URL: imageReprocessQueue.queueUrl
       },
+      logRetention: logs.RetentionDays.ONE_MONTH,
       memorySize: 256,
       runtime: lambda.Runtime.NODEJS_22_X,
       timeout: Duration.seconds(60)
@@ -386,6 +497,7 @@ function handler(event) {
         REPUBLISH_FUNCTION_NAME: republishTrigger.functionName,
         REPROCESS_QUEUE_URL: imageReprocessQueue.queueUrl
       },
+      logRetention: logs.RetentionDays.ONE_MONTH,
       memorySize: 512,
       runtime: lambda.Runtime.NODEJS_22_X,
       timeout: Duration.seconds(30)
@@ -406,6 +518,39 @@ function handler(event) {
       })
     );
 
+    new ses.CfnEmailIdentity(this, 'ContactFromEmailIdentity', {
+      emailIdentity: contactFromEmail
+    });
+
+    const contactApi = new NodejsFunction(this, 'ContactApi', {
+      architecture: lambda.Architecture.X86_64,
+      bundling: {
+        format: OutputFormat.CJS,
+        minify: true,
+        sourceMap: true,
+        target: 'node22'
+      },
+      entry: join(infraRoot, 'lambda', 'contact-api', 'index.ts'),
+      environment: {
+        ADMIN_ORIGIN_SECRET: adminOriginSecret,
+        CONTACT_FROM_EMAIL: contactFromEmail,
+        CONTACT_TO_EMAIL: contactToEmail,
+        DOMAIN_NAME,
+        TURNSTILE_SECRET_KEY: turnstileSecretKey
+      },
+      logRetention: logs.RetentionDays.ONE_MONTH,
+      memorySize: 256,
+      runtime: lambda.Runtime.NODEJS_22_X,
+      timeout: Duration.seconds(15)
+    });
+
+    contactApi.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['ses:SendEmail'],
+        resources: ['*']
+      })
+    );
+
     const adminHttpApi = new apigwv2.HttpApi(this, 'AdminHttpApi', {
       apiName: 'victor-portfolio-admin-api',
       createDefaultStage: true
@@ -413,6 +558,10 @@ function handler(event) {
     const adminHttpIntegration = new apigwv2Integrations.HttpLambdaIntegration(
       'AdminHttpIntegration',
       adminApi
+    );
+    const contactHttpIntegration = new apigwv2Integrations.HttpLambdaIntegration(
+      'ContactHttpIntegration',
+      contactApi
     );
 
     adminHttpApi.addRoutes({
@@ -424,6 +573,11 @@ function handler(event) {
       path: '/api/admin/{proxy+}',
       methods: [apigwv2.HttpMethod.ANY],
       integration: adminHttpIntegration
+    });
+    adminHttpApi.addRoutes({
+      path: '/api/contact',
+      methods: [apigwv2.HttpMethod.ANY],
+      integration: contactHttpIntegration
     });
 
     const apiOriginDomain = cdk.Fn.join('', [
@@ -446,6 +600,24 @@ function handler(event) {
         }
       ],
       originRequestPolicyId: ORIGIN_REQUEST_POLICY_ALL_VIEWER_EXCEPT_HOST_ID,
+      responseHeadersPolicyId: securityHeadersPolicy.ref,
+      targetOriginId: 'admin-api-origin',
+      viewerProtocolPolicy: 'redirect-to-https'
+    };
+
+    const contactApiCacheBehavior = {
+      allowedMethods: ['DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT'],
+      cachedMethods: ['GET', 'HEAD', 'OPTIONS'],
+      cachePolicyId: CACHE_POLICY_CACHING_DISABLED_ID,
+      compress: true,
+      functionAssociations: [
+        {
+          eventType: 'viewer-request',
+          functionArn: redirectWwwFunction.functionArn
+        }
+      ],
+      originRequestPolicyId: ORIGIN_REQUEST_POLICY_ALL_VIEWER_EXCEPT_HOST_ID,
+      responseHeadersPolicyId: securityHeadersPolicy.ref,
       targetOriginId: 'admin-api-origin',
       viewerProtocolPolicy: 'redirect-to-https'
     };
@@ -479,6 +651,7 @@ function handler(event) {
               functionArn: redirectWwwFunction.functionArn
             }
           ],
+          responseHeadersPolicyId: securityHeadersPolicy.ref,
           targetOriginId: 'site-origin',
           viewerProtocolPolicy: 'redirect-to-https'
         },
@@ -530,6 +703,10 @@ function handler(event) {
             ...apiCacheBehavior
           },
           {
+            pathPattern: '/api/contact',
+            ...contactApiCacheBehavior
+          },
+          {
             pathPattern: '/admin*',
             allowedMethods: ['GET', 'HEAD', 'OPTIONS'],
             cachedMethods: ['GET', 'HEAD', 'OPTIONS'],
@@ -541,6 +718,7 @@ function handler(event) {
                 functionArn: adminBasicAuthFunction.functionArn
               }
             ],
+            responseHeadersPolicyId: securityHeadersPolicy.ref,
             targetOriginId: 'site-origin',
             viewerProtocolPolicy: 'redirect-to-https'
           },
@@ -556,6 +734,7 @@ function handler(event) {
                 functionArn: rewritePhotosFunction.functionArn
               }
             ],
+            responseHeadersPolicyId: securityHeadersPolicy.ref,
             targetOriginId: 'photos-origin',
             viewerProtocolPolicy: 'redirect-to-https'
           },
@@ -568,9 +747,10 @@ function handler(event) {
             functionAssociations: [
               {
                 eventType: 'viewer-request',
-                functionArn: redirectWwwFunction.functionArn
+                functionArn: publicDataFunction.functionArn
               }
             ],
+            responseHeadersPolicyId: securityHeadersPolicy.ref,
             targetOriginId: 'photos-origin',
             viewerProtocolPolicy: 'redirect-to-https'
           }
@@ -645,6 +825,9 @@ function handler(event) {
     new CfnOutput(this, 'RepublishTriggerFunctionName', { value: republishTrigger.functionName });
     new CfnOutput(this, 'ImageReprocessQueueUrl', { value: imageReprocessQueue.queueUrl });
     new CfnOutput(this, 'AdminHttpApiUrl', { value: adminHttpApi.apiEndpoint });
+    new CfnOutput(this, 'ContactToEmail', { value: contactToEmail });
+    new CfnOutput(this, 'ContactFromEmail', { value: contactFromEmail });
+    new CfnOutput(this, 'AdminAlertEmail', { value: adminAlertEmail });
   }
 }
 

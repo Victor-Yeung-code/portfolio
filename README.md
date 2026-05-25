@@ -4,7 +4,7 @@ Personal portfolio website for Victor Yeung, focused on art and photography.
 
 ## Current State
 
-The M1 foundation is live at:
+The M5 public site is live at:
 
 - https://victor-yeung.com
 
@@ -26,7 +26,7 @@ The production version will move to:
 
 The M1 implementation lives in:
 
-- `site/` - Astro coming-soon site
+- `site/` - Astro public site and admin UI
 - `infra/` - AWS CDK foundation stack
 
 M1 intentionally does not include GitHub Actions yet. Deploy manually with:
@@ -57,9 +57,10 @@ The image processor Lambda generates:
 - `thumb/{id}.webp` at 400px wide
 - `medium/{id}.webp` at 1200px wide
 - `full/{id}.{ext}` as the original uploaded image for full-size downloads
-- `data/photos.json` with gallery metadata
+- `data/photos.json` for admin/internal metadata
+- `data/gallery.json` with public-safe gallery metadata
 
-Deleting an object from `originals/` removes the generated assets and removes that photo from `data/photos.json`. Public image URLs use `/photos/...`; CloudFront rewrites that prefix to the private photos bucket keys.
+Deleting an object from `originals/` removes the generated assets and removes that photo from `data/photos.json`. Soft-deleted photos remain in the admin registry but are removed from `data/gallery.json`. Public image URLs use `/photos/...`; CloudFront rewrites that prefix to the private photos bucket keys.
 
 ## M3 Watermark Pipeline
 
@@ -106,6 +107,7 @@ M4 adds:
 - Direct API Gateway bypass protection with a private CloudFront origin header
 - React admin island for uploading originals, editing metadata, soft-delete/restore/purge, watermark settings, preview, and republish
 - S3 presigned uploads for photos and PNG watermarks
+- Site Info editing for public `data/site.json`
 
 Set local admin credentials before deploying:
 
@@ -115,6 +117,19 @@ Copy-Item .\infra\.env.example .\infra\.env
 ```
 
 `infra/.env` is ignored by git.
+
+## M5 Public Site
+
+M5 adds:
+
+- Public gallery at `/` using `data/gallery.json`
+- Lightbox with keyboard navigation, browser back-button close, and full-size download links
+- `/about` and `/contact`
+- Contact Lambda at `/api/contact` sending through SES
+- Security response headers, one-month Lambda log retention, and SNS email alerts for the image reprocess DLQ
+- `robots.txt`, `sitemap.xml`, and public nav/footer
+
+Contact emails currently use `victoryeung564@gmail.com` as the sender and recipient. AWS SES will send a verification email for that identity during deployment; contact delivery will not work until that verification is accepted. Cloudflare Turnstile is optional for now and can be enabled later with `PUBLIC_TURNSTILE_SITEKEY` in `site/.env` and `TURNSTILE_SECRET_KEY` in `infra/.env`.
 
 ## Analytics
 

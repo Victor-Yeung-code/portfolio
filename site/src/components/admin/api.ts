@@ -1,4 +1,12 @@
-import type { PhotoEntry, PhotosJson, RepublishStatus, UploadUrlResponse, WatermarkConfig, WatermarkResponse } from './types';
+import type {
+  PhotoEntry,
+  PhotosJson,
+  RepublishStatus,
+  SiteConfig,
+  UploadUrlResponse,
+  WatermarkConfig,
+  WatermarkResponse
+} from './types';
 
 interface UploadUrlRequest {
   filename: string;
@@ -11,6 +19,7 @@ type PhotoPatch = Pick<PhotoEntry, 'title' | 'description' | 'album' | 'order' |
 export const adminApi = {
   getPhotos: () => request<PhotosJson>('/api/admin/photos'),
   getWatermark: () => request<WatermarkResponse>('/api/admin/watermark'),
+  getSite: () => request<SiteConfig>('/api/admin/site'),
   createUploadUrl: (input: UploadUrlRequest) =>
     request<UploadUrlResponse>('/api/admin/upload-url', {
       method: 'POST',
@@ -35,6 +44,11 @@ export const adminApi = {
     }),
   saveWatermark: (config: WatermarkConfig) =>
     request<{ config: WatermarkConfig }>('/api/admin/watermark', {
+      method: 'PUT',
+      body: JSON.stringify(config)
+    }),
+  saveSite: (config: SiteConfig) =>
+    request<{ config: SiteConfig }>('/api/admin/site', {
       method: 'PUT',
       body: JSON.stringify(config)
     }),

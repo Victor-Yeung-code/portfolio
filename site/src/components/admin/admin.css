@@ -48,6 +48,16 @@ button.danger {
   border-color: #8b2f2f;
 }
 
+button.secondary {
+  background: #fff;
+  border-color: #cbd5dc;
+  color: #21313a;
+}
+
+button.secondary:hover:not(:disabled) {
+  background: #eef3f5;
+}
+
 label {
   display: grid;
   gap: 0.35rem;
@@ -246,7 +256,8 @@ input[type="range"] {
 
 .photo-workbench,
 .watermark-grid,
-.republish-panel {
+.republish-panel,
+.site-config-panel {
   display: grid;
   gap: 1rem;
 }
@@ -411,6 +422,31 @@ input[type="range"] {
   margin: 0;
 }
 
+.mini-heading {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.mini-heading h3 {
+  font-size: 1rem;
+  letter-spacing: 0;
+  margin: 0;
+}
+
+.social-editor {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.social-row {
+  align-items: end;
+  display: grid;
+  gap: 0.8rem;
+  grid-template-columns: minmax(8rem, 0.4fr) minmax(14rem, 1fr) auto;
+}
+
 @media (max-width: 900px) {
   .admin-header {
     align-items: stretch;
@@ -426,7 +462,8 @@ input[type="range"] {
     max-width: 20rem;
   }
 
-  .field-grid {
+  .field-grid,
+  .social-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -440,6 +477,7 @@ input[type="range"] {
   .field-grid,
   .field-grid.two-up,
   .queue-meter,
+  .social-row,
   .upload-band {
     grid-template-columns: 1fr;
   }

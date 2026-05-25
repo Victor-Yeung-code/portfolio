@@ -12,7 +12,8 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda
 import { randomUUID } from 'node:crypto';
 import { extname, parse } from 'node:path';
 import { hasErrorName, readPhotosJson, stripBom, updatePhotosJson } from '../_shared/photos-json.js';
-import type { PhotoEntry, WatermarkConfig, WatermarkPosition } from '../_shared/types.js';
+import { readSiteConfig, validateSiteConfig, writeSiteConfig } from '../_shared/site-config.js';
+import type { PhotoEntry, SiteConfig, WatermarkConfig, WatermarkPosition } from '../_shared/types.js';
 import { watermarkPositions } from '../_shared/types.js';
 
 const s3 = new S3Client({});
@@ -64,6 +65,14 @@ async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResu
 
   if (method === 'GET' && path === '/api/admin/watermark') {
     return jsonResponse(200, await getWatermark());
+  }
+
+  if (method === 'GET' && path === '/api/admin/site') {
+    return jsonResponse(200, await readSiteConfig(s3, photosBucket));
+  }
+
+  if (method === 'PUT' && path === '/api/admin/site') {
+    return jsonResponse(200, await saveSite(parseJsonBody<Partial<SiteConfig>>(event)));
   }
 
   if (method === 'POST' && path === '/api/admin/upload-url') {
@@ -302,6 +311,20 @@ async function saveWatermark(input: Partial<WatermarkConfig>): Promise<{ config:
   return { config };
 }
 
+async function saveSite(input: Partial<SiteConfig>): Promise<{ config: SiteConfig }> {
+  let config: SiteConfig;
+
+  try {
+    config = validateSiteConfig(input);
+  } catch (error) {
+    throw httpError(400, error instanceof Error ? error.message : 'Invalid site config.');
+  }
+
+  await writeSiteConfig(s3, photosBucket, config);
+
+  return { config };
+}
+
 async function invokeRepublish(): Promise<{ queued: number }> {
   const response = await lambda.send(
     new InvokeCommand({
@@ -339,8 +362,8 @@ async function invalidatePhotos(): Promise<{ invalidationId?: string }> {
       InvalidationBatch: {
         CallerReference: `admin-republish-${Date.now()}`,
         Paths: {
-          Quantity: 2,
-          Items: ['/photos/*', '/data/photos.json']
+          Quantity: 4,
+          Items: ['/photos/*', '/data/photos.json', '/data/gallery.json', '/data/site.json']
         }
       }
     })
