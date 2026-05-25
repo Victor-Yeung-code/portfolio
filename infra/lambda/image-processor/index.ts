@@ -8,16 +8,14 @@ import {
 import type { S3Event, S3EventRecord, SQSEvent, SQSRecord } from 'aws-lambda';
 import sharp from 'sharp';
 import { basename, extname } from 'node:path';
-import { hasErrorName, stripBom, updatePhotosJson as updateStoredPhotosJson } from '../_shared/photos-json.js';
-import type { PhotoEntry, PhotoVariantName, PhotosJson, WatermarkConfig, WatermarkPosition } from '../_shared/types.js';
-import { watermarkPositions } from '../_shared/types.js';
+import { hasErrorName, readPhotosJson, updatePhotosJson as updateStoredPhotosJson } from '../_shared/photos-json.js';
+import type { PhotoEntry, PhotoVariantName, PhotosJson, WatermarkPosition, WatermarkProfile, WatermarkSettings } from '../_shared/types.js';
+import { readWatermarkSettings } from '../_shared/watermark.js';
 
 const s3 = new S3Client({});
 
 const bucketName = requiredEnv('PHOTOS_BUCKET');
-const watermarkJsonKey = 'data/watermark.json';
 const supportedExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp', '.tif', '.tiff', '.avif']);
-const watermarkPositionSet = new Set<string>(watermarkPositions);
 
 type ImageEvent = S3Event | SQSEvent;
 
@@ -33,8 +31,13 @@ interface ImageDimensions {
 }
 
 interface WatermarkState {
+  settings: WatermarkSettings;
+  source?: Uint8Array;
+}
+
+interface ResolvedWatermark {
   enabled: boolean;
-  config?: WatermarkConfig;
+  profile?: WatermarkProfile;
   source?: Uint8Array;
 }
 
@@ -139,7 +142,13 @@ async function handleCreated(
   const dimensions = normalizedDimensions(metadata);
   const createdAt = original.lastModified;
   const now = new Date().toISOString();
-  const watermark = await context.getWatermark();
+  const [photosDocument, watermarkState] = await Promise.all([
+    readPhotosJson(s3, bucketName),
+    context.getWatermark()
+  ]);
+  const existing = photosDocument.data.photos.find((photo) => photo.id === id);
+  const watermarkProfile = existing ? existing.watermarkProfile ?? null : watermarkState.settings.defaultProfileForUploads;
+  const watermark = resolveWatermark(watermarkState, watermarkProfile, id);
 
   const variantKeys: Record<PhotoVariantName, string> = {
     thumb: `thumb/${id}.webp`,
@@ -163,7 +172,16 @@ async function handleCreated(
 
   await Promise.all([putVariant(thumb), putVariant(medium), putVariant(full)]);
 
-  await upsertPhotoMetadata(id, originalKey, variantKeys, dimensions, createdAt, now, options.metadataMode);
+  await upsertPhotoMetadata(
+    id,
+    originalKey,
+    variantKeys,
+    dimensions,
+    createdAt,
+    now,
+    options.metadataMode,
+    watermarkProfile
+  );
 
   console.log(`Processed ${originalKey} into ${Object.values(variantKeys).join(', ')}`);
 }
@@ -175,7 +193,8 @@ async function upsertPhotoMetadata(
   dimensions: ImageDimensions,
   createdAt: string | null,
   now: string,
-  metadataMode: CreateOptions['metadataMode']
+  metadataMode: CreateOptions['metadataMode'],
+  watermarkProfile: string | null
 ): Promise<void> {
   await updatePhotosJson((current) => {
     const existing = current.photos.find((photo) => photo.id === id);
@@ -189,6 +208,7 @@ async function upsertPhotoMetadata(
       title: existing?.title ?? humanizeTitle(id),
       description: existing?.description ?? '',
       album: existing?.album ?? '',
+      watermarkProfile: existing ? existing.watermarkProfile ?? null : watermarkProfile,
       order,
       originalKey,
       variants: {
@@ -252,7 +272,7 @@ async function renderWebpVariant(
   pipeline: sharp.Sharp,
   dimensions: ImageDimensions,
   key: string,
-  watermark: WatermarkState
+  watermark: ResolvedWatermark
 ): Promise<VariantResult> {
   if (dimensions.width) {
     pipeline = pipeline.resize({ width: dimensions.width, withoutEnlargement: true });
@@ -274,7 +294,7 @@ async function renderFullVariant(
   extension: string,
   contentType: string,
   originalBytes: Uint8Array,
-  watermark: WatermarkState
+  watermark: ResolvedWatermark
 ): Promise<VariantResult> {
   if (!watermark.enabled) {
     return {
@@ -297,13 +317,13 @@ async function renderFullVariant(
 async function applyWatermark(
   pipeline: sharp.Sharp,
   dimensions: ImageDimensions,
-  watermark: WatermarkState
+  watermark: ResolvedWatermark
 ): Promise<sharp.Sharp> {
-  if (!watermark.enabled || !watermark.config || !watermark.source) {
+  if (!watermark.enabled || !watermark.profile || !watermark.source) {
     return pipeline;
   }
 
-  const overlay = await renderWatermarkOverlay(watermark.source, watermark.config, dimensions);
+  const overlay = await renderWatermarkOverlay(watermark.source, watermark.profile, dimensions);
   if (!overlay) {
     return pipeline;
   }
@@ -319,7 +339,7 @@ async function applyWatermark(
 
 async function renderWatermarkOverlay(
   watermarkBuffer: Uint8Array,
-  config: WatermarkConfig,
+  config: WatermarkProfile,
   image: ImageDimensions
 ): Promise<{ buffer: Buffer; left: number; top: number } | null> {
   const shortestSide = Math.max(1, Math.min(image.width, image.height));
@@ -385,77 +405,52 @@ function watermarkCoordinates(
 }
 
 async function readWatermarkState(): Promise<WatermarkState> {
-  const config = await readWatermarkConfig();
+  const settings = await readWatermarkSettings(s3, bucketName);
 
-  if (!config || config.opacity <= 0) {
-    return { enabled: false };
+  if (!settings.file) {
+    return { settings };
   }
 
   try {
-    const response = await s3.send(new GetObjectCommand({ Bucket: bucketName, Key: config.file }));
+    const response = await s3.send(new GetObjectCommand({ Bucket: bucketName, Key: settings.file }));
     if (!response.Body) {
-      console.warn(`Watermark object was empty: ${config.file}`);
-      return { enabled: false };
+      console.warn(`Watermark object was empty: ${settings.file}`);
+      return { settings };
     }
 
     return {
-      enabled: true,
-      config,
+      settings,
       source: await response.Body.transformToByteArray()
     };
   } catch (error) {
     if (error instanceof NoSuchKey || hasErrorName(error, 'NoSuchKey')) {
-      console.warn(`Watermark object was not found: ${config.file}`);
-      return { enabled: false };
+      console.warn(`Watermark object was not found: ${settings.file}`);
+      return { settings };
     }
 
     throw error;
   }
 }
 
-async function readWatermarkConfig(): Promise<WatermarkConfig | null> {
-  try {
-    const response = await s3.send(new GetObjectCommand({ Bucket: bucketName, Key: watermarkJsonKey }));
-    const body = response.Body ? await response.Body.transformToString('utf-8') : '';
-
-    if (!body.trim()) {
-      return null;
-    }
-
-    return normalizeWatermarkConfig(JSON.parse(stripBom(body)) as Partial<WatermarkConfig>);
-  } catch (error) {
-    if (error instanceof NoSuchKey || hasErrorName(error, 'NoSuchKey')) {
-      return null;
-    }
-
-    throw error;
-  }
-}
-
-function normalizeWatermarkConfig(input: Partial<WatermarkConfig>): WatermarkConfig | null {
-  const file = typeof input.file === 'string' ? input.file.replace(/^\/+/, '') : '';
-
-  if (!file) {
-    console.warn('watermark.json did not include a file key.');
-    return null;
+function resolveWatermark(state: WatermarkState, profileId: string | null, photoId: string): ResolvedWatermark {
+  if (!profileId) {
+    return { enabled: false };
   }
 
-  const position =
-    typeof input.position === 'string' && watermarkPositionSet.has(input.position)
-      ? (input.position as WatermarkPosition)
-      : 'bottom-right';
+  const profile = state.settings.profiles.find((item) => item.id === profileId);
+  if (!profile) {
+    console.warn(`Photo ${photoId} references missing watermark profile: ${profileId}`);
+    return { enabled: false };
+  }
 
-  const minWidthPx = positiveNumber(input.minWidthPx, 40);
-  const maxWidthPx = Math.max(minWidthPx, positiveNumber(input.maxWidthPx, 600));
+  if (!state.settings.file || !state.source || profile.opacity <= 0) {
+    return { enabled: false };
+  }
 
   return {
-    file,
-    position,
-    marginPct: nonNegativeNumber(input.marginPct, 3),
-    widthPct: positiveNumber(input.widthPct, 15),
-    opacity: clamp(nonNegativeNumber(input.opacity, 0.7), 0, 1),
-    minWidthPx,
-    maxWidthPx
+    enabled: true,
+    profile,
+    source: state.source
   };
 }
 
@@ -584,14 +579,6 @@ function photoEntriesEqual(left: PhotoEntry, right: PhotoEntry): boolean {
 
 function isSqsEvent(event: ImageEvent): event is SQSEvent {
   return event.Records[0] ? 'messageId' in event.Records[0] : false;
-}
-
-function positiveNumber(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
-}
-
-function nonNegativeNumber(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {

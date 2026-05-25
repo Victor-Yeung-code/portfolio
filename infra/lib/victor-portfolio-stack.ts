@@ -529,6 +529,7 @@ function handler(event) {
 
     photosBucket.grantReadWrite(adminApi);
     republishTrigger.grantInvoke(adminApi);
+    imageReprocessQueue.grantSendMessages(adminApi);
     adminApi.addToRolePolicy(
       new iam.PolicyStatement({
         actions: ['sqs:GetQueueAttributes'],

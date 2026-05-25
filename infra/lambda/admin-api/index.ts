@@ -6,15 +6,23 @@ import {
   PutObjectCommand,
   S3Client
 } from '@aws-sdk/client-s3';
-import { GetQueueAttributesCommand, SQSClient } from '@aws-sdk/client-sqs';
+import { GetQueueAttributesCommand, SendMessageBatchCommand, SQSClient } from '@aws-sdk/client-sqs';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { APIGatewayProxyEventV2, APIGatewayProxyResultV2 } from 'aws-lambda';
 import { randomUUID } from 'node:crypto';
 import { extname, parse } from 'node:path';
 import { hasErrorName, readPhotosJson, stripBom, updatePhotosJson } from '../_shared/photos-json.js';
 import { readSiteConfig, validateSiteConfig, writeSiteConfig } from '../_shared/site-config.js';
-import type { PhotoEntry, SiteConfig, WatermarkConfig, WatermarkPosition } from '../_shared/types.js';
-import { watermarkPositions } from '../_shared/types.js';
+import type { PhotoEntry, SiteConfig, WatermarkProfile, WatermarkSettings } from '../_shared/types.js';
+import {
+  createWatermarkProfile,
+  normalizeNullableProfileId,
+  normalizeProfileId,
+  normalizeWatermarkFile,
+  readWatermarkSettings,
+  slugifyProfileName,
+  updateWatermarkSettings
+} from '../_shared/watermark.js';
 
 const s3 = new S3Client({});
 const lambda = new LambdaClient({});
@@ -27,9 +35,7 @@ const queueUrl = requiredEnv('REPROCESS_QUEUE_URL');
 const adminOriginSecret = requiredEnv('ADMIN_ORIGIN_SECRET');
 const distributionId = requiredEnv('DISTRIBUTION_ID');
 const domainName = requiredEnv('DOMAIN_NAME');
-const watermarkJsonKey = 'data/watermark.json';
 const photoContentTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/tiff', 'image/avif']);
-const watermarkPositionSet = new Set<string>(watermarkPositions);
 
 export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> => {
   try {
@@ -64,7 +70,11 @@ async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResu
   }
 
   if (method === 'GET' && path === '/api/admin/watermark') {
-    return jsonResponse(200, await getWatermark());
+    return jsonResponse(410, { error: 'Use /api/admin/watermark-settings.' });
+  }
+
+  if (method === 'GET' && path === '/api/admin/watermark-settings') {
+    return jsonResponse(200, await getWatermarkSettingsResponse());
   }
 
   if (method === 'GET' && path === '/api/admin/site') {
@@ -99,7 +109,24 @@ async function route(event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResu
   }
 
   if (method === 'PUT' && path === '/api/admin/watermark') {
-    return jsonResponse(200, await saveWatermark(parseJsonBody<Partial<WatermarkConfig>>(event)));
+    return jsonResponse(410, { error: 'Use /api/admin/watermark-settings.' });
+  }
+
+  if (method === 'PUT' && path === '/api/admin/watermark-settings') {
+    return jsonResponse(200, await saveWatermarkSettings(parseJsonBody<WatermarkSettingsPatch>(event)));
+  }
+
+  if (method === 'POST' && path === '/api/admin/watermark-profiles') {
+    return jsonResponse(200, await createProfile(parseJsonBody<WatermarkProfilePatch>(event)));
+  }
+
+  const profileMatch = path.match(/^\/api\/admin\/watermark-profiles\/([^/]+)$/);
+  if (profileMatch && method === 'PUT') {
+    return jsonResponse(200, await updateProfile(decodeURIComponent(profileMatch[1]), parseJsonBody<WatermarkProfilePatch>(event)));
+  }
+
+  if (profileMatch && method === 'DELETE') {
+    return jsonResponse(200, await deleteProfile(decodeURIComponent(profileMatch[1])));
   }
 
   if (method === 'POST' && path === '/api/admin/republish') {
@@ -128,7 +155,15 @@ interface PhotoPatch {
   description?: unknown;
   album?: unknown;
   order?: unknown;
+  watermarkProfile?: unknown;
 }
+
+interface WatermarkSettingsPatch {
+  file?: unknown;
+  defaultProfileForUploads?: unknown;
+}
+
+type WatermarkProfilePatch = Partial<WatermarkProfile>;
 
 async function createUploadUrl(input: UploadUrlRequest): Promise<{ id?: string; key: string; url: string; headers: Record<string, string> }> {
   const filename = stringValue(input.filename, 'filename');
@@ -176,9 +211,14 @@ async function signedPutUrl(key: string, contentType: string): Promise<string> {
   );
 }
 
-async function updatePhoto(id: string, patch: PhotoPatch): Promise<{ photo: PhotoEntry }> {
+async function updatePhoto(id: string, patch: PhotoPatch): Promise<{ photo: PhotoEntry; reprocessQueued: boolean }> {
   const safeId = validatePhotoId(id);
   let updated: PhotoEntry | undefined;
+  let reprocessOriginalKey: string | undefined;
+  const hasWatermarkProfilePatch = Object.prototype.hasOwnProperty.call(patch, 'watermarkProfile');
+  const watermarkProfile = hasWatermarkProfilePatch
+    ? await validatePhotoWatermarkProfile(patch.watermarkProfile)
+    : undefined;
 
   await updatePhotosJson(s3, photosBucket, (current) => {
     const existing = current.photos.find((photo) => photo.id === safeId);
@@ -186,14 +226,20 @@ async function updatePhoto(id: string, patch: PhotoPatch): Promise<{ photo: Phot
       throw httpError(400, 'Photo not found.');
     }
 
+    const existingWatermarkProfile = existing.watermarkProfile ?? null;
+    const nextWatermarkProfile = hasWatermarkProfilePatch ? watermarkProfile! : existingWatermarkProfile;
+    const profileChanged = existingWatermarkProfile !== nextWatermarkProfile;
+
     updated = {
       ...existing,
       title: optionalString(patch.title, existing.title),
       description: optionalString(patch.description, existing.description),
       album: optionalString(patch.album, existing.album),
       order: optionalOrder(patch.order, existing.order),
+      watermarkProfile: nextWatermarkProfile,
       updatedAt: new Date().toISOString()
     };
+    reprocessOriginalKey = profileChanged ? existing.originalKey : undefined;
 
     const photos = current.photos.map((photo) => (photo.id === safeId ? updated! : photo));
     photos.sort((left, right) => left.order - right.order || left.id.localeCompare(right.id));
@@ -205,7 +251,11 @@ async function updatePhoto(id: string, patch: PhotoPatch): Promise<{ photo: Phot
     };
   });
 
-  return { photo: updated! };
+  if (reprocessOriginalKey) {
+    await sendReprocessMessages([reprocessOriginalKey]);
+  }
+
+  return { photo: updated!, reprocessQueued: Boolean(reprocessOriginalKey) };
 }
 
 async function setPhotoDeleted(id: string, deleted: boolean): Promise<{ photo: PhotoEntry }> {
@@ -252,29 +302,11 @@ async function purgePhoto(id: string): Promise<APIGatewayProxyResultV2> {
   return jsonResponse(202, { ok: true });
 }
 
-async function getWatermark(): Promise<{ config: WatermarkConfig | null; previewUrl?: string }> {
-  try {
-    const response = await s3.send(new GetObjectCommand({ Bucket: photosBucket, Key: watermarkJsonKey }));
-    const body = response.Body ? await response.Body.transformToString('utf-8') : '';
-    const config = body ? normalizeWatermarkConfig(JSON.parse(stripBom(body)) as Partial<WatermarkConfig>) : null;
-
-    if (!config) {
-      return { config: null };
-    }
-
-    const previewUrl = await getWatermarkPreviewDataUrl(config.file);
-
-    return { config, previewUrl };
-  } catch (error) {
-    if (hasErrorName(error, 'NoSuchKey')) {
-      return { config: null };
-    }
-
-    throw error;
-  }
-}
-
 async function getWatermarkPreviewDataUrl(key: string): Promise<string | undefined> {
+  if (!key) {
+    return undefined;
+  }
+
   try {
     const watermark = await s3.send(new GetObjectCommand({ Bucket: photosBucket, Key: key }));
     const bytes = watermark.Body ? await watermark.Body.transformToByteArray() : new Uint8Array();
@@ -290,23 +322,133 @@ async function getWatermarkPreviewDataUrl(key: string): Promise<string | undefin
   }
 }
 
-async function saveWatermark(input: Partial<WatermarkConfig>): Promise<{ config: WatermarkConfig }> {
-  const config = normalizeWatermarkConfig(input);
-  if (!config) {
-    throw httpError(400, 'Invalid watermark config.');
-  }
+async function getWatermarkSettingsResponse(): Promise<{ settings: WatermarkSettings; previewUrl?: string }> {
+  const settings = await readWatermarkSettings(s3, photosBucket);
+  return {
+    settings,
+    previewUrl: await getWatermarkPreviewDataUrl(settings.file)
+  };
+}
 
-  await s3.send(
-    new PutObjectCommand({
-      Bucket: photosBucket,
-      Key: watermarkJsonKey,
-      Body: JSON.stringify(config, null, 2),
-      CacheControl: 'public, max-age=60',
-      ContentType: 'application/json; charset=utf-8'
-    })
+async function saveWatermarkSettings(
+  input: WatermarkSettingsPatch
+): Promise<{ settings: WatermarkSettings; previewUrl?: string }> {
+  const settings = await updateWatermarkSettings(s3, photosBucket, (current) => {
+    const file = Object.prototype.hasOwnProperty.call(input, 'file')
+      ? validateWatermarkFile(input.file)
+      : current.file;
+    const defaultProfileForUploads = Object.prototype.hasOwnProperty.call(input, 'defaultProfileForUploads')
+      ? validateDefaultProfile(input.defaultProfileForUploads, current)
+      : current.defaultProfileForUploads;
+
+    return {
+      ...current,
+      file,
+      defaultProfileForUploads
+    };
+  });
+
+  return {
+    settings,
+    previewUrl: await getWatermarkPreviewDataUrl(settings.file)
+  };
+}
+
+async function createProfile(
+  input: WatermarkProfilePatch
+): Promise<{ settings: WatermarkSettings; profile: WatermarkProfile; previewUrl?: string }> {
+  let created: WatermarkProfile | undefined;
+  const settings = await updateWatermarkSettings(s3, photosBucket, (current) => {
+    const name = typeof input.name === 'string' ? input.name.trim() : '';
+    if (!name) {
+      throw httpError(400, 'Missing profile name.');
+    }
+
+    const id = uniqueProfileId(slugifyProfileName(name), current.profiles);
+    const profile = createWatermarkProfile(id, input, { name });
+    if (!profile) {
+      throw httpError(400, 'Invalid profile settings.');
+    }
+
+    created = profile;
+    return {
+      ...current,
+      profiles: [...current.profiles, profile]
+    };
+  });
+
+  return {
+    settings,
+    profile: created!,
+    previewUrl: await getWatermarkPreviewDataUrl(settings.file)
+  };
+}
+
+async function updateProfile(
+  id: string,
+  input: WatermarkProfilePatch
+): Promise<{ settings: WatermarkSettings; profile: WatermarkProfile; queued: number; previewUrl?: string }> {
+  const safeId = validateProfileId(id);
+  let updated: WatermarkProfile | undefined;
+  const settings = await updateWatermarkSettings(s3, photosBucket, (current) => {
+    const existing = current.profiles.find((profile) => profile.id === safeId);
+    if (!existing) {
+      throw httpError(400, 'Profile not found.');
+    }
+
+    const profile = createWatermarkProfile(safeId, input, existing);
+    if (!profile) {
+      throw httpError(400, 'Invalid profile settings.');
+    }
+
+    updated = profile;
+    return {
+      ...current,
+      profiles: current.profiles.map((item) => (item.id === safeId ? profile : item))
+    };
+  });
+  const photos = (await readPhotosJson(s3, photosBucket)).data.photos.filter(
+    (photo) => (photo.watermarkProfile ?? null) === safeId
+  );
+  await sendReprocessMessages(photos.map((photo) => photo.originalKey));
+
+  return {
+    settings,
+    profile: updated!,
+    queued: photos.length,
+    previewUrl: await getWatermarkPreviewDataUrl(settings.file)
+  };
+}
+
+async function deleteProfile(
+  id: string
+): Promise<{ settings: WatermarkSettings; deleted: true; previewUrl?: string }> {
+  const safeId = validateProfileId(id);
+  const photos = (await readPhotosJson(s3, photosBucket)).data.photos.filter(
+    (photo) => (photo.watermarkProfile ?? null) === safeId
   );
 
-  return { config };
+  if (photos.length > 0) {
+    throw httpError(409, `Profile is used by ${photos.length} photo${photos.length === 1 ? '' : 's'}.`);
+  }
+
+  const settings = await updateWatermarkSettings(s3, photosBucket, (current) => {
+    if (!current.profiles.some((profile) => profile.id === safeId)) {
+      throw httpError(400, 'Profile not found.');
+    }
+
+    return {
+      ...current,
+      defaultProfileForUploads: current.defaultProfileForUploads === safeId ? null : current.defaultProfileForUploads,
+      profiles: current.profiles.filter((profile) => profile.id !== safeId)
+    };
+  });
+
+  return {
+    settings,
+    deleted: true,
+    previewUrl: await getWatermarkPreviewDataUrl(settings.file)
+  };
 }
 
 async function saveSite(input: Partial<SiteConfig>): Promise<{ config: SiteConfig }> {
@@ -370,28 +512,98 @@ async function invalidatePhotos(): Promise<{ invalidationId?: string }> {
   return { invalidationId: response.Invalidation?.Id };
 }
 
-function normalizeWatermarkConfig(input: Partial<WatermarkConfig>): WatermarkConfig | null {
-  const file = typeof input.file === 'string' ? input.file.replace(/^\/+/, '') : '';
-  if (!file || !file.startsWith('watermarks/') || file.includes('..') || !file.toLowerCase().endsWith('.png')) {
+async function validatePhotoWatermarkProfile(value: unknown): Promise<string | null> {
+  const profileId = normalizeNullableProfileId(value);
+  if (value !== null && value !== undefined && value !== '' && !profileId) {
+    throw httpError(400, 'Invalid watermark profile.');
+  }
+
+  if (!profileId) {
     return null;
   }
 
-  const position =
-    typeof input.position === 'string' && watermarkPositionSet.has(input.position)
-      ? (input.position as WatermarkPosition)
-      : 'bottom-right';
-  const minWidthPx = positiveNumber(input.minWidthPx, 40);
-  const maxWidthPx = Math.max(minWidthPx, positiveNumber(input.maxWidthPx, 600));
+  const settings = await readWatermarkSettings(s3, photosBucket);
+  if (!settings.profiles.some((profile) => profile.id === profileId)) {
+    throw httpError(400, 'Watermark profile not found.');
+  }
 
-  return {
-    file,
-    position,
-    marginPct: clamp(nonNegativeNumber(input.marginPct, 3), 0, 20),
-    widthPct: clamp(positiveNumber(input.widthPct, 15), 1, 50),
-    opacity: clamp(nonNegativeNumber(input.opacity, 0.7), 0, 1),
-    minWidthPx,
-    maxWidthPx
-  };
+  return profileId;
+}
+
+function validateDefaultProfile(value: unknown, settings: WatermarkSettings): string | null {
+  const profileId = normalizeNullableProfileId(value);
+  if (value !== null && value !== undefined && value !== '' && !profileId) {
+    throw httpError(400, 'Invalid default profile.');
+  }
+
+  if (!profileId) {
+    return null;
+  }
+
+  if (!settings.profiles.some((profile) => profile.id === profileId)) {
+    throw httpError(400, 'Default profile not found.');
+  }
+
+  return profileId;
+}
+
+function validateWatermarkFile(value: unknown): string {
+  const file = normalizeWatermarkFile(value);
+  if (file === null) {
+    throw httpError(400, 'Invalid watermark file.');
+  }
+
+  return file;
+}
+
+function validateProfileId(id: string): string {
+  const profileId = normalizeProfileId(id);
+  if (!profileId) {
+    throw httpError(400, 'Invalid profile id.');
+  }
+
+  return profileId;
+}
+
+function uniqueProfileId(baseId: string, profiles: WatermarkProfile[]): string {
+  const used = new Set(profiles.map((profile) => profile.id));
+  const safeBase = normalizeProfileId(baseId) ?? 'profile';
+
+  if (!used.has(safeBase)) {
+    return safeBase;
+  }
+
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `${safeBase}-${index}`;
+    if (!used.has(candidate)) {
+      return candidate;
+    }
+  }
+
+  throw httpError(400, 'Unable to create a unique profile id.');
+}
+
+async function sendReprocessMessages(originalKeys: string[]): Promise<void> {
+  for (let index = 0; index < originalKeys.length; index += 10) {
+    const batch = originalKeys.slice(index, index + 10);
+    if (batch.length === 0) {
+      continue;
+    }
+
+    const response = await sqs.send(
+      new SendMessageBatchCommand({
+        QueueUrl: queueUrl,
+        Entries: batch.map((originalKey, offset) => ({
+          Id: `message${index + offset}`,
+          MessageBody: JSON.stringify({ originalKey })
+        }))
+      })
+    );
+
+    if (response.Failed && response.Failed.length > 0) {
+      throw new Error(`Failed to enqueue reprocess messages: ${response.Failed.map((item) => item.Id).join(', ')}`);
+    }
+  }
 }
 
 function parseJsonBody<T>(event: APIGatewayProxyEventV2): T {
@@ -490,18 +702,6 @@ function optionalString(value: unknown, fallback: string): string {
 
 function optionalOrder(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
-}
-
-function positiveNumber(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
-}
-
-function nonNegativeNumber(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : fallback;
-}
-
-function clamp(value: number, minimum: number, maximum: number): number {
-  return Math.min(maximum, Math.max(minimum, value));
 }
 
 function requiredEnv(name: string): string {

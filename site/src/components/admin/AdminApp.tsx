@@ -25,6 +25,14 @@ const emptySite: SiteConfig = {
   footer: 'Copyright 2026 Victor Yeung'
 };
 
+const emptyWatermark: WatermarkResponse = {
+  settings: {
+    file: '',
+    defaultProfileForUploads: null,
+    profiles: []
+  }
+};
+
 const tabs: Array<{ id: AdminTab; label: string }> = [
   { id: 'photos', label: 'Photos' },
   { id: 'watermark', label: 'Watermark' },
@@ -35,7 +43,7 @@ const tabs: Array<{ id: AdminTab; label: string }> = [
 export default function AdminApp() {
   const [activeTab, setActiveTab] = useState<AdminTab>('photos');
   const [photos, setPhotos] = useState<PhotosJson>(emptyPhotos);
-  const [watermark, setWatermark] = useState<WatermarkResponse>({ config: null });
+  const [watermark, setWatermark] = useState<WatermarkResponse>(emptyWatermark);
   const [site, setSite] = useState<SiteConfig>(emptySite);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState('');
@@ -133,6 +141,7 @@ export default function AdminApp() {
           <PhotoUpload onUploaded={(ids) => void refreshAfterUpload(ids)} onError={setError} />
           <PhotoList
             photos={photos.photos}
+            profiles={watermark.settings.profiles}
             onChanged={(photo) =>
               setPhotos((current) => ({
                 ...current,
@@ -151,9 +160,12 @@ export default function AdminApp() {
           </div>
           <WatermarkConfigPanel
             response={watermark}
+            photos={photos.photos}
             onChanged={(next) => {
               setWatermark(next);
-              setNotice('Watermark saved. Republish existing photos to apply it.');
+            }}
+            onNotice={(message) => {
+              setNotice(message);
             }}
             onError={setError}
           />

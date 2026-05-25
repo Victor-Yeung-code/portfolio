@@ -16,6 +16,7 @@ export interface PhotoEntry {
   title: string;
   description: string;
   album: string;
+  watermarkProfile?: string | null;
   order: number;
   originalKey: string;
   variants: Record<PhotoVariantName, string>;
@@ -44,8 +45,25 @@ export interface WatermarkConfig {
   maxWidthPx: number;
 }
 
+export interface WatermarkProfile {
+  id: string;
+  name: string;
+  position: WatermarkPosition;
+  marginPct: number;
+  widthPct: number;
+  opacity: number;
+  minWidthPx: number;
+  maxWidthPx: number;
+}
+
+export interface WatermarkSettings {
+  file: string;
+  defaultProfileForUploads: string | null;
+  profiles: WatermarkProfile[];
+}
+
 export interface WatermarkResponse {
-  config: WatermarkConfig | null;
+  settings: WatermarkSettings;
   previewUrl?: string;
 }
 

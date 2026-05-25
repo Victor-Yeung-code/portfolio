@@ -262,6 +262,7 @@ input[type="range"] {
 
 .photo-workbench,
 .watermark-grid,
+.watermark-manager,
 .republish-panel,
 .site-config-panel {
   display: grid;
@@ -349,6 +350,16 @@ input[type="range"] {
   padding: 0.55rem 0.7rem;
 }
 
+.row-note {
+  background: #e7f3f1;
+  border: 1px solid #afd7d1;
+  border-radius: 6px;
+  color: #16443f;
+  font-weight: 700;
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+}
+
 .row-actions {
   display: flex;
   flex-wrap: wrap;
@@ -357,6 +368,12 @@ input[type="range"] {
 
 .watermark-grid {
   grid-template-columns: minmax(18rem, 0.75fr) minmax(20rem, 1.25fr);
+}
+
+.watermark-settings {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: minmax(18rem, 1fr) minmax(18rem, 1fr);
 }
 
 .control-panel,
@@ -611,6 +628,37 @@ input[type="range"] {
   color: #842525;
 }
 
+.profile-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.profile-row {
+  align-items: center;
+  background: #f7fafb;
+  border: 1px solid #d8e0e5;
+  border-radius: 8px;
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: minmax(12rem, 1fr) minmax(8rem, 0.5fr) minmax(8rem, 0.5fr) auto;
+  padding: 0.8rem;
+}
+
+.profile-row div:first-child {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.profile-row strong {
+  color: #152028;
+}
+
+.profile-row span {
+  color: #66747d;
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+
 @media (max-width: 900px) {
   .admin-header {
     align-items: stretch;
@@ -618,7 +666,9 @@ input[type="range"] {
   }
 
   .photo-row,
-  .watermark-grid {
+  .watermark-grid,
+  .watermark-settings,
+  .profile-row {
     grid-template-columns: 1fr;
   }
 

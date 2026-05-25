@@ -140,6 +140,7 @@ function normalizePhotoEntry(input: unknown): PhotoEntry | null {
     title: stringValue(photo.title),
     description: stringValue(photo.description),
     album: stringValue(photo.album),
+    watermarkProfile: normalizeNullableString(photo.watermarkProfile),
     order: typeof photo.order === 'number' && Number.isFinite(photo.order) ? photo.order : 0,
     originalKey: stringValue(photo.originalKey),
     variants: {
@@ -163,6 +164,15 @@ function isPhotoEntry(value: PhotoEntry | null): value is PhotoEntry {
 
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value : '';
+}
+
+function normalizeNullableString(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
 }
 
 export function stripBom(value: string): string {
