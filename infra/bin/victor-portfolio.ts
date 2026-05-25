@@ -24,7 +24,6 @@ const foundationStack = new VictorPortfolioFoundationStack(app, 'VictorPortfolio
     region: 'us-west-2'
   },
   crossRegionReferences: true,
-  synthesizer: new cdk.CliCredentialsStackSynthesizer(),
   certificate: certStack.certificate
 });
 
