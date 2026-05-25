@@ -71,7 +71,6 @@ export interface SiteConfig {
   name: string;
   tagline: string;
   bio: string;
-  email: string;
   social: SocialLink[];
   footer: string;
 }

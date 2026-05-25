@@ -243,7 +243,6 @@ function Publish-PublicData {
       name = 'Victor Yeung'
       tagline = 'Art & Photography'
       bio = '<p>Victor Yeung is building a new photography portfolio. A fuller artist statement and biography will be added soon.</p>'
-      email = 'victoryeung564@gmail.com'
       social = @()
       footer = 'Copyright 2026 Victor Yeung'
     }
