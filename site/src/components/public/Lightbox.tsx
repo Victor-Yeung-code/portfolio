@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { TransformComponent, TransformWrapper } from 'react-zoom-pan-pinch';
 import type { GalleryPhoto } from '../../lib/public-data';
 
@@ -9,6 +9,18 @@ interface LightboxProps {
   onPrev: () => void;
 }
 
+type TransformState = {
+  scale: number;
+  positionX: number;
+  positionY: number;
+};
+
+type SetTransform = (positionX: number, positionY: number, scale: number, animationTime?: number) => void;
+type ResetTransform = (animationTime?: number) => void;
+
+const clickMoveTolerance = 6;
+const clickZoomAnimationMs = 220;
+const clickZoomScale = 2;
 const wheelZoomStep = 0.001;
 
 export function Lightbox({ photo, onClose, onNext, onPrev }: LightboxProps) {
@@ -16,6 +28,7 @@ export function Lightbox({ photo, onClose, onNext, onPrev }: LightboxProps) {
   const [controlsVisible, setControlsVisible] = useState(true);
   const [isZoomed, setIsZoomed] = useState(false);
   const idleTimer = useRef<number | null>(null);
+  const pointerStart = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     setHighResSrc(null);
@@ -76,13 +89,56 @@ export function Lightbox({ photo, onClose, onNext, onPrev }: LightboxProps) {
 
   const visibleSrc = highResSrc ?? photo.variants.medium;
 
+  const handleCanvasPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) {
+      return;
+    }
+
+    pointerStart.current = { x: event.clientX, y: event.clientY };
+  };
+
+  const handleCanvasPointerUp = (
+    event: ReactPointerEvent<HTMLDivElement>,
+    state: TransformState,
+    setTransform: SetTransform,
+    resetTransform: ResetTransform
+  ) => {
+    if (event.button !== 0) {
+      return;
+    }
+
+    const start = pointerStart.current;
+    pointerStart.current = null;
+    if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > clickMoveTolerance) {
+      return;
+    }
+
+    if (state.scale > 1.001) {
+      setIsZoomed(false);
+      resetTransform(clickZoomAnimationMs);
+      return;
+    }
+
+    const wrapperRect = event.currentTarget.getBoundingClientRect();
+    const pointX = (event.clientX - wrapperRect.left - state.positionX) / state.scale;
+    const pointY = (event.clientY - wrapperRect.top - state.positionY) / state.scale;
+
+    setIsZoomed(true);
+    setTransform(
+      event.clientX - wrapperRect.left - pointX * clickZoomScale,
+      event.clientY - wrapperRect.top - pointY * clickZoomScale,
+      clickZoomScale,
+      clickZoomAnimationMs
+    );
+  };
+
   return (
     <div className="lightbox" role="dialog" aria-modal="true" aria-label={photo.title}>
       <TransformWrapper
         centerOnInit
         alignmentAnimation={{ disabled: true }}
         centerZoomedOut={false}
-        doubleClick={{ mode: 'reset', step: 0.5 }}
+        doubleClick={{ disabled: true }}
         initialScale={1}
         key={photo.id}
         maxScale={8}
@@ -93,18 +149,24 @@ export function Lightbox({ photo, onClose, onNext, onPrev }: LightboxProps) {
         velocityAnimation={{ disabled: false }}
         wheel={{ step: wheelZoomStep }}
       >
-        <TransformComponent
-          wrapperClass={isZoomed ? 'lightbox-canvas is-zoomed' : 'lightbox-canvas'}
-          contentClass="lightbox-canvas-content"
-        >
-          <img
-            alt={photo.title}
-            draggable={false}
-            height={photo.height}
-            src={visibleSrc}
-            width={photo.width}
-          />
-        </TransformComponent>
+        {({ state, setTransform, resetTransform }) => (
+          <TransformComponent
+            wrapperClass={isZoomed ? 'lightbox-canvas is-zoomed' : 'lightbox-canvas'}
+            wrapperProps={{
+              onPointerDown: handleCanvasPointerDown,
+              onPointerUp: (event) => handleCanvasPointerUp(event, state, setTransform, resetTransform)
+            }}
+            contentClass="lightbox-canvas-content"
+          >
+            <img
+              alt={photo.title}
+              draggable={false}
+              height={photo.height}
+              src={visibleSrc}
+              width={photo.width}
+            />
+          </TransformComponent>
+        )}
       </TransformWrapper>
 
       <button className="lightbox-close" onClick={onClose} type="button" aria-label="Close">
