@@ -48,10 +48,15 @@
 }
 
 .site-header nav a,
+.gallery-nav-button,
 .text-links a,
 .footer-inner nav a {
+  background: transparent;
+  border: 0;
   border-radius: 999px;
   color: #384045;
+  cursor: pointer;
+  font: inherit;
   font-size: 0.9rem;
   font-weight: 700;
   padding: 0.45rem 0.65rem;
@@ -60,10 +65,49 @@
 
 .site-header nav a.is-active,
 .site-header nav a:hover,
+.gallery-nav-button.is-active,
+.gallery-nav-button:hover,
 .text-links a:hover,
 .footer-inner nav a:hover {
   background: #163f4d;
   color: #fff;
+}
+
+.gallery-nav {
+  position: relative;
+}
+
+.gallery-nav-menu {
+  background: #ffffff;
+  border: 1px solid #d9ddd8;
+  border-radius: 8px;
+  box-shadow: 0 18px 44px rgb(17 20 22 / 12%);
+  display: grid;
+  gap: 0.2rem;
+  left: 0;
+  min-width: 12rem;
+  opacity: 0;
+  padding: 0.35rem;
+  pointer-events: none;
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  transform: translateY(-0.25rem);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+  z-index: 30;
+}
+
+.gallery-nav:hover .gallery-nav-menu,
+.gallery-nav.is-open .gallery-nav-menu,
+.gallery-nav:focus-within .gallery-nav-menu {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.site-header nav .gallery-nav-menu a {
+  border-radius: 6px;
+  padding: 0.55rem 0.7rem;
+  white-space: nowrap;
 }
 
 .public-main {
@@ -125,14 +169,7 @@
   margin: 0;
 }
 
-.gallery-tools div {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  justify-content: end;
-}
-
-.gallery-tools span {
+.gallery-tools strong {
   border: 1px solid #cfd7d2;
   border-radius: 999px;
   color: #4f5a60;

@@ -22,7 +22,6 @@ export interface PhotoEntry {
   width: number;
   height: number;
   takenAt: string | null;
-  tags: string[];
   createdAt: string;
   updatedAt: string;
   deleted?: boolean;

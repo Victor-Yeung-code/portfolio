@@ -1,12 +1,25 @@
 import { useEffect, useMemo, useState } from 'react';
 import { fetchGallery, type GalleryPhoto } from '../../lib/public-data';
+import { slugify } from '../../lib/slug';
+
+type AlbumOption = [slug: string, label: string];
 
 export function PublicGallery() {
   const [photos, setPhotos] = useState<GalleryPhoto[]>([]);
+  const [activeAlbum, setActiveAlbum] = useState<string | null>(null);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const activePhoto = activeIndex === null ? null : photos[activeIndex] ?? null;
+  const albums = useMemo(() => extractAlbums(photos), [photos]);
+  const activeAlbumName = activeAlbum ? albums.find(([slug]) => slug === activeAlbum)?.[1] ?? activeAlbum : null;
+  const filteredPhotos = useMemo(() => {
+    if (!activeAlbum) {
+      return photos;
+    }
+
+    return photos.filter((photo) => slugify(photo.album) === activeAlbum);
+  }, [activeAlbum, photos]);
+  const activePhoto = activeIndex === null ? null : filteredPhotos[activeIndex] ?? null;
 
   useEffect(() => {
     let mounted = true;
@@ -17,10 +30,17 @@ export function PublicGallery() {
           return;
         }
 
+        const nextAlbum = albumSlugFromLocation();
+        const nextPhotos = nextAlbum
+          ? gallery.photos.filter((photo) => slugify(photo.album) === nextAlbum)
+          : gallery.photos;
+
         setPhotos(gallery.photos);
+        setActiveAlbum(nextAlbum);
+
         const photoId = photoIdFromLocation();
         if (photoId) {
-          const index = gallery.photos.findIndex((photo) => photo.id === photoId);
+          const index = nextPhotos.findIndex((photo) => photo.id === photoId);
           if (index >= 0) {
             setActiveIndex(index);
             if (photoIdFromHash()) {
@@ -42,13 +62,17 @@ export function PublicGallery() {
 
   useEffect(() => {
     const onPopState = () => {
+      const nextAlbum = albumSlugFromLocation();
+      const nextPhotos = nextAlbum ? photos.filter((photo) => slugify(photo.album) === nextAlbum) : photos;
       const photoId = photoIdFromLocation();
+
+      setActiveAlbum(nextAlbum);
       if (!photoId) {
         setActiveIndex(null);
         return;
       }
 
-      const index = photos.findIndex((photo) => photo.id === photoId);
+      const index = nextPhotos.findIndex((photo) => photo.id === photoId);
       setActiveIndex(index >= 0 ? index : null);
     };
 
@@ -73,22 +97,20 @@ export function PublicGallery() {
 
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [activeIndex, photos.length]);
+  }, [activeIndex, filteredPhotos.length]);
 
   useEffect(() => {
     document.body.classList.toggle('has-lightbox', activeIndex !== null);
     return () => document.body.classList.remove('has-lightbox');
   }, [activeIndex]);
 
-  const groupedTags = useMemo(() => {
-    const tags = new Set<string>();
-    photos.forEach((photo) => photo.tags.forEach((tag) => tags.add(tag)));
-    return Array.from(tags).slice(0, 8);
-  }, [photos]);
+  useEffect(() => {
+    document.title = activeAlbumName ? `${activeAlbumName} | Victor Yeung` : 'Victor Yeung | Photography Portfolio';
+  }, [activeAlbumName]);
 
   const openLightbox = (index: number) => {
     setActiveIndex(index);
-    const photo = photos[index];
+    const photo = filteredPhotos[index];
     if (photo) {
       window.history.pushState({ galleryLightbox: true }, '', photoUrl(photo.id));
     }
@@ -108,8 +130,8 @@ export function PublicGallery() {
 
   const step = (direction: 1 | -1) => {
     setActiveIndex((current) => {
-      const next = nextIndex(current, photos.length, direction);
-      const photo = next === null ? null : photos[next];
+      const next = nextIndex(current, filteredPhotos.length, direction);
+      const photo = next === null ? null : filteredPhotos[next];
       if (photo) {
         window.history.replaceState({ galleryLightbox: true }, '', photoUrl(photo.id));
       }
@@ -120,18 +142,16 @@ export function PublicGallery() {
   return (
     <>
       <section className="gallery-tools" aria-label="Gallery summary">
-        <p>{loading ? 'Loading gallery' : `${photos.length} selected ${photos.length === 1 ? 'work' : 'works'}`}</p>
-        {groupedTags.length > 0 && (
-          <div aria-label="Tags">
-            {groupedTags.map((tag) => (
-              <span key={tag}>{tag}</span>
-            ))}
-          </div>
-        )}
+        <p>
+          {loading
+            ? 'Loading gallery'
+            : `${filteredPhotos.length} selected ${filteredPhotos.length === 1 ? 'work' : 'works'}`}
+        </p>
+        {activeAlbumName && <strong>{activeAlbumName}</strong>}
       </section>
 
       <section className="gallery-grid" aria-label="Photo gallery">
-        {photos.map((photo, index) => (
+        {filteredPhotos.map((photo, index) => (
           <button className="gallery-card" key={photo.id} onClick={() => openLightbox(index)} type="button">
             <img
               alt={photo.title}
@@ -145,8 +165,10 @@ export function PublicGallery() {
             </span>
           </button>
         ))}
-        {!loading && photos.length === 0 && (
-          <p className="gallery-empty">The first public gallery edit is coming soon.</p>
+        {!loading && filteredPhotos.length === 0 && (
+          <p className="gallery-empty">
+            {activeAlbum ? 'No photos in this album yet.' : 'The first public gallery edit is coming soon.'}
+          </p>
         )}
       </section>
 
@@ -195,6 +217,25 @@ export function PublicGallery() {
       )}
     </>
   );
+}
+
+function extractAlbums(photos: GalleryPhoto[]): AlbumOption[] {
+  const labels = new Map<string, string>();
+
+  for (const photo of photos) {
+    const label = photo.album.trim();
+    const slug = slugify(label);
+    if (slug && !labels.has(slug)) {
+      labels.set(slug, label);
+    }
+  }
+
+  return Array.from(labels.entries()).sort(([, left], [, right]) => left.localeCompare(right));
+}
+
+function albumSlugFromLocation(): string | null {
+  const slug = new URLSearchParams(window.location.search).get('album');
+  return slug ? slug.toLowerCase() : null;
 }
 
 function photoIdFromLocation(): string | null {

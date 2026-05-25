@@ -20,7 +20,7 @@ export function PhotoList({ photos, onChanged, onRefresh }: PhotoListProps) {
         !query ||
         photo.title.toLowerCase().includes(query) ||
         photo.id.toLowerCase().includes(query) ||
-        photo.tags.some((tag) => tag.toLowerCase().includes(query));
+        photo.album.toLowerCase().includes(query);
 
       return matchesDeleted && matchesQuery;
     });
@@ -73,11 +73,7 @@ function PhotoRow({ photo, onChanged, onRefresh }: PhotoRowProps) {
         title: draft.title,
         description: draft.description,
         album: draft.album,
-        order: Number(draft.order) || 0,
-        tags: draft.tags
-          .split(',')
-          .map((tag) => tag.trim())
-          .filter(Boolean)
+        order: Number(draft.order) || 0
       });
       onChanged(response.photo);
     } catch (reason) {
@@ -162,10 +158,6 @@ function PhotoRow({ photo, onChanged, onRefresh }: PhotoRowProps) {
               value={draft.album}
             />
           </label>
-          <label>
-            <span>Tags</span>
-            <input onChange={(event) => setDraft({ ...draft, tags: event.currentTarget.value })} value={draft.tags} />
-          </label>
         </div>
 
         <label>
@@ -214,7 +206,6 @@ function draftFromPhoto(photo: PhotoEntry) {
     title: photo.title,
     description: photo.description,
     album: photo.album,
-    order: String(photo.order),
-    tags: photo.tags.join(', ')
+    order: String(photo.order)
   };
 }

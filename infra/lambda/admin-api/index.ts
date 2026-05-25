@@ -128,7 +128,6 @@ interface PhotoPatch {
   description?: unknown;
   album?: unknown;
   order?: unknown;
-  tags?: unknown;
 }
 
 async function createUploadUrl(input: UploadUrlRequest): Promise<{ id?: string; key: string; url: string; headers: Record<string, string> }> {
@@ -193,7 +192,6 @@ async function updatePhoto(id: string, patch: PhotoPatch): Promise<{ photo: Phot
       description: optionalString(patch.description, existing.description),
       album: optionalString(patch.album, existing.album),
       order: optionalOrder(patch.order, existing.order),
-      tags: optionalTags(patch.tags, existing.tags),
       updatedAt: new Date().toISOString()
     };
 
@@ -492,26 +490,6 @@ function optionalString(value: unknown, fallback: string): string {
 
 function optionalOrder(value: unknown, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
-}
-
-function optionalTags(value: unknown, fallback: string[]): string[] {
-  if (Array.isArray(value)) {
-    return value
-      .filter((item): item is string => typeof item === 'string')
-      .map((item) => item.trim())
-      .filter(Boolean)
-      .slice(0, 30);
-  }
-
-  if (typeof value === 'string') {
-    return value
-      .split(',')
-      .map((item) => item.trim())
-      .filter(Boolean)
-      .slice(0, 30);
-  }
-
-  return fallback;
 }
 
 function positiveNumber(value: unknown, fallback: number): number {

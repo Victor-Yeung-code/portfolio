@@ -14,7 +14,7 @@ interface UploadUrlRequest {
   kind: 'photo' | 'watermark';
 }
 
-type PhotoPatch = Pick<PhotoEntry, 'title' | 'description' | 'album' | 'order' | 'tags'>;
+type PhotoPatch = Pick<PhotoEntry, 'title' | 'description' | 'album' | 'order'>;
 
 export const adminApi = {
   getPhotos: () => request<PhotosJson>('/api/admin/photos'),

@@ -199,7 +199,6 @@ async function upsertPhotoMetadata(
       width: dimensions.width,
       height: dimensions.height,
       takenAt: existing?.takenAt ?? null,
-      tags: existing?.tags ?? [],
       createdAt: previousCreatedAt,
       updatedAt: metadataMode === 'reprocess' && existing ? existing.updatedAt : now,
       deleted: existing?.deleted ?? false,
