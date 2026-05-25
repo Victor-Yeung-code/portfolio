@@ -12,10 +12,12 @@ interface LightboxProps {
 export function Lightbox({ photo, onClose, onNext, onPrev }: LightboxProps) {
   const [highResSrc, setHighResSrc] = useState<string | null>(null);
   const [controlsVisible, setControlsVisible] = useState(true);
+  const [isZoomed, setIsZoomed] = useState(false);
   const idleTimer = useRef<number | null>(null);
 
   useEffect(() => {
     setHighResSrc(null);
+    setIsZoomed(false);
     const preload = new Image();
     preload.onload = () => setHighResSrc(photo.variants.full);
     preload.src = photo.variants.full;
@@ -37,7 +39,7 @@ export function Lightbox({ photo, onClose, onNext, onPrev }: LightboxProps) {
       if (idleTimer.current !== null) {
         window.clearTimeout(idleTimer.current);
       }
-      idleTimer.current = window.setTimeout(() => setControlsVisible(false), 2500);
+      idleTimer.current = window.setTimeout(() => setControlsVisible(false), 1500);
     };
 
     window.addEventListener('mousemove', showAndScheduleHide);
@@ -76,15 +78,29 @@ export function Lightbox({ photo, onClose, onNext, onPrev }: LightboxProps) {
     <div className="lightbox" role="dialog" aria-modal="true" aria-label={photo.title}>
       <TransformWrapper
         centerOnInit
-        doubleClick={{ mode: 'reset' }}
+        alignmentAnimation={{ disabled: true }}
+        centerZoomedOut={false}
+        doubleClick={{ mode: 'reset', step: 0.5 }}
         initialScale={1}
         key={photo.id}
         maxScale={8}
         minScale={1}
-        wheel={{ step: 0.2 }}
+        onTransform={(_, state) => setIsZoomed(state.scale > 1.001)}
+        pinch={{ step: 5 }}
+        velocityAnimation={{ disabled: false }}
+        wheel={{ step: 0.1, smoothStep: 0.001 }}
       >
-        <TransformComponent wrapperClass="lightbox-canvas" contentClass="lightbox-canvas-content">
-          <img alt={photo.title} draggable={false} src={visibleSrc} />
+        <TransformComponent
+          wrapperClass={isZoomed ? 'lightbox-canvas is-zoomed' : 'lightbox-canvas'}
+          contentClass="lightbox-canvas-content"
+        >
+          <img
+            alt={photo.title}
+            draggable={false}
+            height={photo.height}
+            src={visibleSrc}
+            width={photo.width}
+          />
         </TransformComponent>
       </TransformWrapper>
 
