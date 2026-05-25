@@ -152,17 +152,21 @@ export function PublicGallery() {
 
       <section className="gallery-grid" aria-label="Photo gallery">
         {filteredPhotos.map((photo, index) => (
-          <button className="gallery-card" key={photo.id} onClick={() => openLightbox(index)} type="button">
+          <button
+            aria-label={photo.title || photo.id}
+            className="gallery-card"
+            key={photo.id}
+            onClick={() => openLightbox(index)}
+            type="button"
+          >
             <img
               alt={photo.title}
+              height={photo.height}
               loading="lazy"
               src={photo.variants.thumb}
               srcSet={`${photo.variants.thumb} 1x, ${photo.variants.medium} 2x`}
+              width={photo.width}
             />
-            <span>
-              <strong>{photo.title}</strong>
-              {photo.description && <em>{photo.description}</em>}
-            </span>
           </button>
         ))}
         {!loading && filteredPhotos.length === 0 && (
