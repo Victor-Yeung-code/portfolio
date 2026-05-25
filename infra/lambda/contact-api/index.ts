@@ -56,7 +56,7 @@ export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGateway
       return jsonResponse(error.statusCode, { error: error.message });
     }
 
-    console.error(error);
+    logUnexpectedContactError(error);
     return jsonResponse(500, { error: 'Unable to send message right now.' });
   }
 };
@@ -204,6 +204,55 @@ function stripBom(value: string): string {
 
 function stringField(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function logUnexpectedContactError(error: unknown): void {
+  const name = error instanceof Error ? error.name : 'Unknown';
+
+  console.error(
+    JSON.stringify({
+      event: 'ContactFormError',
+      name,
+      message: error instanceof Error ? error.message : String(error),
+      code: errorCode(error),
+      httpStatus: errorHttpStatus(error)
+    })
+  );
+
+  if (name === 'MessageRejected' || name === 'MessageRejectedException') {
+    console.warn(
+      JSON.stringify({
+        event: 'SesMessageRejected',
+        hint: 'SES rejected the email. Verify CONTACT_FROM_EMAIL in the SES console for us-west-2. See docs/handoff.md.'
+      })
+    );
+  }
+}
+
+function errorCode(error: unknown): string | undefined {
+  if (typeof error === 'object' && error !== null) {
+    const candidate = error as { Code?: unknown; code?: unknown };
+    if (typeof candidate.Code === 'string') {
+      return candidate.Code;
+    }
+
+    if (typeof candidate.code === 'string') {
+      return candidate.code;
+    }
+  }
+
+  return undefined;
+}
+
+function errorHttpStatus(error: unknown): number | undefined {
+  if (typeof error === 'object' && error !== null) {
+    const candidate = error as { $metadata?: { httpStatusCode?: unknown } };
+    return typeof candidate.$metadata?.httpStatusCode === 'number'
+      ? candidate.$metadata.httpStatusCode
+      : undefined;
+  }
+
+  return undefined;
 }
 
 function requiredEnv(name: string): string {

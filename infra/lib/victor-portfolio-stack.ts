@@ -823,6 +823,7 @@ function handler(event) {
     new CfnOutput(this, 'CloudFrontHostedZoneId', { value: CLOUDFRONT_HOSTED_ZONE_ID });
     new CfnOutput(this, 'ImageProcessorFunctionName', { value: imageProcessor.functionName });
     new CfnOutput(this, 'RepublishTriggerFunctionName', { value: republishTrigger.functionName });
+    new CfnOutput(this, 'ContactApiFunctionName', { value: contactApi.functionName });
     new CfnOutput(this, 'ImageReprocessQueueUrl', { value: imageReprocessQueue.queueUrl });
     new CfnOutput(this, 'AdminHttpApiUrl', { value: adminHttpApi.apiEndpoint });
     new CfnOutput(this, 'ContactToEmail', { value: contactToEmail });

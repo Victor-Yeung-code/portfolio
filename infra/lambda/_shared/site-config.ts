@@ -4,15 +4,19 @@ import {
   PutObjectCommand,
   S3Client
 } from '@aws-sdk/client-s3';
+import sanitizeHtml from 'sanitize-html';
 import { hasErrorName, stripBom } from './photos-json.js';
 import type { SiteConfig, SocialLink } from './types.js';
 
 export const siteConfigKey = 'data/site.json';
+const bioTextLimit = 15000;
+const bioAllowedTags = ['p', 'br', 'strong', 'em', 'u', 'ul', 'ol', 'li', 'h2', 'h3', 'h4', 'a', 'blockquote'];
+const bioAllowedAttributes = { a: ['href', 'rel', 'target'] };
 
 export const defaultSiteConfig: SiteConfig = {
   name: 'Victor Yeung',
   tagline: 'Art & Photography',
-  bio: 'Victor Yeung is building a new photography portfolio. A fuller artist statement and biography will be added soon.',
+  bio: '<p>Victor Yeung is building a new photography portfolio. A fuller artist statement and biography will be added soon.</p>',
   email: 'victoryeung564@gmail.com',
   social: [],
   footer: 'Copyright 2026 Victor Yeung'
@@ -49,7 +53,7 @@ export function normalizeSiteConfig(input: Partial<SiteConfig>): SiteConfig {
   return {
     name: cleanString(input.name, defaultSiteConfig.name, 80),
     tagline: cleanString(input.tagline, defaultSiteConfig.tagline, 120),
-    bio: cleanString(input.bio, defaultSiteConfig.bio, 5000),
+    bio: normalizeBio(input.bio),
     email: cleanString(input.email, defaultSiteConfig.email, 320),
     social: normalizeSocialLinks(input.social),
     footer: cleanString(input.footer, defaultSiteConfig.footer, 200)
@@ -61,6 +65,10 @@ export function validateSiteConfig(input: Partial<SiteConfig>): SiteConfig {
 
   if (config.name.length < 1) {
     throw new Error('Name is required.');
+  }
+
+  if (plainTextLength(config.bio) > bioTextLimit) {
+    throw new Error('Bio must be 15000 characters or fewer.');
   }
 
   if (config.email && !isEmail(config.email)) {
@@ -106,6 +114,61 @@ function cleanString(value: unknown, fallback: string, limit: number): string {
   }
 
   return value.trim().slice(0, limit);
+}
+
+function normalizeBio(value: unknown): string {
+  const raw = typeof value === 'string' && value.trim() ? value.trim() : defaultSiteConfig.bio;
+  return sanitizeBio(toHtmlIfPlainText(raw));
+}
+
+export function sanitizeBio(html: string): string {
+  return sanitizeHtml(html, {
+    allowedTags: bioAllowedTags,
+    allowedAttributes: bioAllowedAttributes,
+    allowedSchemes: ['http', 'https', 'mailto'],
+    disallowedTagsMode: 'discard',
+    transformTags: {
+      a: (_tagName, attribs) => {
+        const href = typeof attribs.href === 'string' ? attribs.href : '';
+
+        return {
+          tagName: 'a',
+          attribs: {
+            href,
+            rel: 'noopener noreferrer',
+            target: '_blank'
+          }
+        };
+      }
+    }
+  }).trim();
+}
+
+function plainTextLength(html: string): number {
+  return sanitizeHtml(html, {
+    allowedTags: [],
+    allowedAttributes: {}
+  }).length;
+}
+
+function toHtmlIfPlainText(value: string): string {
+  if (/<[a-z][\s\S]*>/i.test(value)) {
+    return value;
+  }
+
+  return value
+    .split(/\n{2,}/)
+    .map((paragraph) => `<p>${escapeHtml(paragraph).replace(/\n/g, '<br>')}</p>`)
+    .join('');
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function isEmail(value: string): boolean {

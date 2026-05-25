@@ -242,7 +242,7 @@ function Publish-PublicData {
     $siteConfig = [ordered]@{
       name = 'Victor Yeung'
       tagline = 'Art & Photography'
-      bio = 'Victor Yeung is building a new photography portfolio. A fuller artist statement and biography will be added soon.'
+      bio = '<p>Victor Yeung is building a new photography portfolio. A fuller artist statement and biography will be added soon.</p>'
       email = 'victoryeung564@gmail.com'
       social = @()
       footer = 'Copyright 2026 Victor Yeung'

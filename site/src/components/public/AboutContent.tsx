@@ -12,11 +12,7 @@ export function AboutContent() {
     <section className="content-panel" aria-labelledby="about-title">
       <p className="eyebrow">{site.tagline}</p>
       <h1 id="about-title">About {site.name}</h1>
-      <div className="prose">
-        {site.bio.split(/\n{2,}/).map((paragraph) => (
-          <p key={paragraph}>{paragraph}</p>
-        ))}
-      </div>
+      <div className="prose" dangerouslySetInnerHTML={{ __html: site.bio }} />
       {site.social.length > 0 && (
         <div className="text-links" aria-label="Social links">
           {site.social.map((link) => (
