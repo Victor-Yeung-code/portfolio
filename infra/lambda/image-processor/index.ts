@@ -16,12 +16,13 @@ const s3 = new S3Client({});
 
 const bucketName = requiredEnv('PHOTOS_BUCKET');
 const supportedExtensions = new Set(['.jpg', '.jpeg', '.png', '.webp', '.tif', '.tiff', '.avif']);
+const fullVariantExtensions = ['.png', '.jpg', '.jpeg', '.webp', '.tif', '.tiff', '.avif'];
+const staleFullVariantExtensions = fullVariantExtensions.filter((extension) => extension !== '.png');
 
 type ImageEvent = S3Event | SQSEvent;
 
 interface OriginalObject {
   bytes: Uint8Array;
-  contentType: string;
   lastModified: string | null;
 }
 
@@ -136,7 +137,7 @@ async function handleCreated(
     return;
   }
 
-  const original = await getOriginalObject(originalKey, extension);
+  const original = await getOriginalObject(originalKey);
   const baseImage = sharp(original.bytes, { failOn: 'none', sequentialRead: true }).rotate();
   const metadata = await baseImage.metadata();
   const dimensions = normalizedDimensions(metadata);
@@ -153,7 +154,7 @@ async function handleCreated(
   const variantKeys: Record<PhotoVariantName, string> = {
     thumb: `thumb/${id}.webp`,
     medium: `medium/${id}.webp`,
-    full: `full/${id}${extension}`
+    full: `full/${id}.png`
   };
 
   const [thumb, medium, full] = await Promise.all([
@@ -164,13 +165,13 @@ async function handleCreated(
       dimensions,
       variantKeys.full,
       extension,
-      original.contentType,
       original.bytes,
       watermark
     )
   ]);
 
   await Promise.all([putVariant(thumb), putVariant(medium), putVariant(full)]);
+  await deleteStaleFullVariants(id);
 
   await upsertPhotoMetadata(
     id,
@@ -250,7 +251,7 @@ async function handleRemoved(originalKey: string): Promise<void> {
     return;
   }
 
-  await deleteVariants(id, extension);
+  await deleteVariants(id);
 
   await updatePhotosJson((current) => {
     const photos = current.photos.filter((photo) => photo.id !== id);
@@ -292,25 +293,29 @@ async function renderFullVariant(
   dimensions: ImageDimensions,
   key: string,
   extension: string,
-  contentType: string,
   originalBytes: Uint8Array,
   watermark: ResolvedWatermark
 ): Promise<VariantResult> {
-  if (!watermark.enabled) {
+  if (!watermark.enabled && extension === '.png') {
     return {
       key,
       body: originalBytes,
-      contentType
+      contentType: 'image/png'
     };
   }
 
-  pipeline = await applyWatermark(pipeline, dimensions, watermark);
-  pipeline = encodeFullVariant(pipeline.keepMetadata(), extension);
+  if (watermark.enabled) {
+    pipeline = await applyWatermark(pipeline, dimensions, watermark);
+  }
 
   return {
     key,
-    body: await pipeline.toBuffer(),
-    contentType
+    body: await pipeline
+      .keepMetadata()
+      .withMetadata({ orientation: 1 })
+      .png({ compressionLevel: 9, progressive: true })
+      .toBuffer(),
+    contentType: 'image/png'
   };
 }
 
@@ -454,7 +459,7 @@ function resolveWatermark(state: WatermarkState, profileId: string | null, photo
   };
 }
 
-async function getOriginalObject(key: string, extension: string): Promise<OriginalObject> {
+async function getOriginalObject(key: string): Promise<OriginalObject> {
   const response = await s3.send(new GetObjectCommand({ Bucket: bucketName, Key: key }));
 
   if (!response.Body) {
@@ -463,7 +468,6 @@ async function getOriginalObject(key: string, extension: string): Promise<Origin
 
   return {
     bytes: await response.Body.transformToByteArray(),
-    contentType: response.ContentType ?? contentTypeForExtension(extension),
     lastModified: response.LastModified?.toISOString() ?? null
   };
 }
@@ -480,7 +484,7 @@ async function putVariant(variant: VariantResult): Promise<void> {
   );
 }
 
-async function deleteVariants(id: string, extension: string): Promise<void> {
+async function deleteVariants(id: string): Promise<void> {
   await s3.send(
     new DeleteObjectsCommand({
       Bucket: bucketName,
@@ -488,8 +492,20 @@ async function deleteVariants(id: string, extension: string): Promise<void> {
         Objects: [
           { Key: `thumb/${id}.webp` },
           { Key: `medium/${id}.webp` },
-          { Key: `full/${id}${extension}` }
+          ...fullVariantExtensions.map((extension) => ({ Key: `full/${id}${extension}` }))
         ],
+        Quiet: true
+      }
+    })
+  );
+}
+
+async function deleteStaleFullVariants(id: string): Promise<void> {
+  await s3.send(
+    new DeleteObjectsCommand({
+      Bucket: bucketName,
+      Delete: {
+        Objects: staleFullVariantExtensions.map((extension) => ({ Key: `full/${id}${extension}` })),
         Quiet: true
       }
     })
@@ -529,22 +545,6 @@ function resizeToWidth(dimensions: ImageDimensions, targetWidth: number): ImageD
   };
 }
 
-function encodeFullVariant(pipeline: sharp.Sharp, extension: string): sharp.Sharp {
-  switch (extension) {
-    case '.avif':
-      return pipeline.avif({ quality: 80 });
-    case '.png':
-      return pipeline.png({ compressionLevel: 9 });
-    case '.tif':
-    case '.tiff':
-      return pipeline.tiff();
-    case '.webp':
-      return pipeline.webp({ quality: 90 });
-    default:
-      return pipeline.jpeg({ quality: 90 });
-  }
-}
-
 function decodeS3Key(key: string): string {
   return decodeURIComponent(key.replace(/\+/g, ' '));
 }
@@ -555,22 +555,6 @@ function humanizeTitle(id: string): string {
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/\b\w/g, (character) => character.toUpperCase());
-}
-
-function contentTypeForExtension(extension: string): string {
-  switch (extension) {
-    case '.avif':
-      return 'image/avif';
-    case '.png':
-      return 'image/png';
-    case '.tif':
-    case '.tiff':
-      return 'image/tiff';
-    case '.webp':
-      return 'image/webp';
-    default:
-      return 'image/jpeg';
-  }
 }
 
 function photoEntriesEqual(left: PhotoEntry, right: PhotoEntry): boolean {
