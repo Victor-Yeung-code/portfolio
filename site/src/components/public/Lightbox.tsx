@@ -21,46 +21,18 @@ type ResetTransform = (animationTime?: number) => void;
 const clickMoveTolerance = 6;
 const clickZoomAnimationMs = 220;
 const clickZoomScale = 2;
+const lightboxImageSizes = '(max-width: 600px) calc(100vw - 2rem), calc(100vw - 4rem)';
 const wheelZoomStep = 0.001;
 
 export function Lightbox({ photo, onClose, onNext, onPrev }: LightboxProps) {
-  const [highResSrc, setHighResSrc] = useState<string | null>(null);
-  const [isHighResVisible, setIsHighResVisible] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [isZoomed, setIsZoomed] = useState(false);
   const idleTimer = useRef<number | null>(null);
   const pointerStart = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
-    let isCancelled = false;
-    setHighResSrc(null);
-    setIsHighResVisible(false);
     setIsZoomed(false);
-
-    const preload = new Image();
-    preload.decoding = 'async';
-    preload.src = photo.variants.full;
-
-    void preload
-      .decode()
-      .catch(() => undefined)
-      .then(() => {
-        if (isCancelled) {
-          return;
-        }
-
-        setHighResSrc(photo.variants.full);
-        window.requestAnimationFrame(() => {
-          if (!isCancelled) {
-            setIsHighResVisible(true);
-          }
-        });
-      });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [photo.id, photo.variants.full]);
+  }, [photo.id]);
 
   useEffect(() => {
     const isTouchOnly = window.matchMedia('(hover: none)').matches;
@@ -176,26 +148,20 @@ export function Lightbox({ photo, onClose, onNext, onPrev }: LightboxProps) {
             }}
             contentClass="lightbox-canvas-content"
           >
-            <div className={isHighResVisible ? 'lightbox-image-stack is-full-loaded' : 'lightbox-image-stack'}>
+            <div className="lightbox-image-frame">
               <img
                 alt={photo.title}
-                className="lightbox-image lightbox-image-medium"
+                className="lightbox-image"
+                decoding="async"
                 draggable={false}
+                fetchPriority="high"
                 height={photo.height}
-                src={photo.variants.medium}
+                loading="eager"
+                sizes={lightboxImageSizes}
+                src={photo.variants.full}
+                srcSet={lightboxSrcSet(photo)}
                 width={photo.width}
               />
-              {highResSrc ? (
-                <img
-                  alt=""
-                  aria-hidden="true"
-                  className="lightbox-image lightbox-image-full"
-                  draggable={false}
-                  height={photo.height}
-                  src={highResSrc}
-                  width={photo.width}
-                />
-              ) : null}
             </div>
           </TransformComponent>
         )}
@@ -218,6 +184,15 @@ export function Lightbox({ photo, onClose, onNext, onPrev }: LightboxProps) {
       </div>
     </div>
   );
+}
+
+function lightboxSrcSet(photo: GalleryPhoto) {
+  const mediumWidth = Math.min(photo.width, 1200);
+  if (mediumWidth >= photo.width) {
+    return `${photo.variants.full} ${photo.width}w`;
+  }
+
+  return `${photo.variants.medium} ${mediumWidth}w, ${photo.variants.full} ${photo.width}w`;
 }
 
 function CloseIcon() {
