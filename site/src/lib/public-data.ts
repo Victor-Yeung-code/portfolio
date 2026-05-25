@@ -10,7 +10,6 @@ export interface GalleryPhoto {
   width: number;
   height: number;
   takenAt: string | null;
-  tags: string[];
 }
 
 export interface GalleryJson {
@@ -80,9 +79,44 @@ function normalizeGallery(input: Partial<GalleryJson>): GalleryJson {
     updatedAt: typeof input.updatedAt === 'string' ? input.updatedAt : emptyGallery.updatedAt,
     photos: Array.isArray(input.photos)
       ? input.photos
-          .filter((photo): photo is GalleryPhoto => Boolean(photo?.id && photo?.variants?.thumb && photo?.variants?.medium))
+          .map(normalizeGalleryPhoto)
+          .filter((photo): photo is GalleryPhoto => photo !== null)
           .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id))
       : []
+  };
+}
+
+function normalizeGalleryPhoto(input: unknown): GalleryPhoto | null {
+  if (typeof input !== 'object' || input === null) {
+    return null;
+  }
+
+  const photo = input as Partial<GalleryPhoto>;
+  const variants = typeof photo.variants === 'object' && photo.variants !== null ? photo.variants : null;
+  if (
+    !stringValue(photo.id, '') ||
+    !variants ||
+    !stringValue(variants.thumb, '') ||
+    !stringValue(variants.medium, '') ||
+    !stringValue(variants.full, '')
+  ) {
+    return null;
+  }
+
+  return {
+    id: stringValue(photo.id, ''),
+    title: stringValue(photo.title, ''),
+    description: stringValue(photo.description, ''),
+    album: stringValue(photo.album, ''),
+    order: typeof photo.order === 'number' && Number.isFinite(photo.order) ? photo.order : 0,
+    variants: {
+      thumb: stringValue(variants.thumb, ''),
+      medium: stringValue(variants.medium, ''),
+      full: stringValue(variants.full, '')
+    },
+    width: typeof photo.width === 'number' && Number.isFinite(photo.width) ? photo.width : 0,
+    height: typeof photo.height === 'number' && Number.isFinite(photo.height) ? photo.height : 0,
+    takenAt: typeof photo.takenAt === 'string' ? photo.takenAt : null
   };
 }
 

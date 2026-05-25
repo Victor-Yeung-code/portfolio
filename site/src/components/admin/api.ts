@@ -4,7 +4,7 @@ import type {
   RepublishStatus,
   SiteConfig,
   UploadUrlResponse,
-  WatermarkConfig,
+  WatermarkProfile,
   WatermarkResponse
 } from './types';
 
@@ -14,11 +14,13 @@ interface UploadUrlRequest {
   kind: 'photo' | 'watermark';
 }
 
-type PhotoPatch = Pick<PhotoEntry, 'title' | 'description' | 'album' | 'order' | 'tags'>;
+type PhotoPatch = Pick<PhotoEntry, 'title' | 'description' | 'album' | 'order' | 'watermarkProfile'>;
+type WatermarkSettingsPatch = Pick<WatermarkResponse['settings'], 'file' | 'defaultProfileForUploads'>;
+type WatermarkProfilePatch = Omit<WatermarkProfile, 'id'>;
 
 export const adminApi = {
   getPhotos: () => request<PhotosJson>('/api/admin/photos'),
-  getWatermark: () => request<WatermarkResponse>('/api/admin/watermark'),
+  getWatermark: () => request<WatermarkResponse>('/api/admin/watermark-settings'),
   getSite: () => request<SiteConfig>('/api/admin/site'),
   createUploadUrl: (input: UploadUrlRequest) =>
     request<UploadUrlResponse>('/api/admin/upload-url', {
@@ -26,7 +28,7 @@ export const adminApi = {
       body: JSON.stringify(input)
     }),
   updatePhoto: (id: string, patch: PhotoPatch) =>
-    request<{ photo: PhotoEntry }>(`/api/admin/photos/${encodeURIComponent(id)}`, {
+    request<{ photo: PhotoEntry; reprocessQueued: boolean }>(`/api/admin/photos/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       body: JSON.stringify(patch)
     }),
@@ -42,10 +44,27 @@ export const adminApi = {
     request<{ ok: true }>(`/api/admin/photos/${encodeURIComponent(id)}`, {
       method: 'DELETE'
     }),
-  saveWatermark: (config: WatermarkConfig) =>
-    request<{ config: WatermarkConfig }>('/api/admin/watermark', {
+  saveWatermarkSettings: (settings: WatermarkSettingsPatch) =>
+    request<WatermarkResponse>('/api/admin/watermark-settings', {
       method: 'PUT',
-      body: JSON.stringify(config)
+      body: JSON.stringify(settings)
+    }),
+  createWatermarkProfile: (profile: WatermarkProfilePatch) =>
+    request<WatermarkResponse & { profile: WatermarkProfile }>('/api/admin/watermark-profiles', {
+      method: 'POST',
+      body: JSON.stringify(profile)
+    }),
+  updateWatermarkProfile: (id: string, profile: WatermarkProfilePatch) =>
+    request<WatermarkResponse & { profile: WatermarkProfile; queued: number }>(
+      `/api/admin/watermark-profiles/${encodeURIComponent(id)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(profile)
+      }
+    ),
+  deleteWatermarkProfile: (id: string) =>
+    request<WatermarkResponse & { deleted: true }>(`/api/admin/watermark-profiles/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
     }),
   saveSite: (config: SiteConfig) =>
     request<{ config: SiteConfig }>('/api/admin/site', {

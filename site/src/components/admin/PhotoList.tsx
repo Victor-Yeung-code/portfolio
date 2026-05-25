@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { adminApi } from './api';
-import type { PhotoEntry } from './types';
+import type { PhotoEntry, WatermarkProfile } from './types';
 
 interface PhotoListProps {
   photos: PhotoEntry[];
+  profiles: WatermarkProfile[];
   onChanged: (photo: PhotoEntry) => void;
   onRefresh: () => void;
 }
 
-export function PhotoList({ photos, onChanged, onRefresh }: PhotoListProps) {
+export function PhotoList({ photos, profiles, onChanged, onRefresh }: PhotoListProps) {
   const [showDeleted, setShowDeleted] = useState(false);
   const [filter, setFilter] = useState('');
 
@@ -20,7 +21,7 @@ export function PhotoList({ photos, onChanged, onRefresh }: PhotoListProps) {
         !query ||
         photo.title.toLowerCase().includes(query) ||
         photo.id.toLowerCase().includes(query) ||
-        photo.tags.some((tag) => tag.toLowerCase().includes(query));
+        photo.album.toLowerCase().includes(query);
 
       return matchesDeleted && matchesQuery;
     });
@@ -41,7 +42,7 @@ export function PhotoList({ photos, onChanged, onRefresh }: PhotoListProps) {
 
       <div className="photo-list">
         {visiblePhotos.map((photo) => (
-          <PhotoRow key={photo.id} onChanged={onChanged} onRefresh={onRefresh} photo={photo} />
+          <PhotoRow key={photo.id} onChanged={onChanged} onRefresh={onRefresh} photo={photo} profiles={profiles} />
         ))}
         {visiblePhotos.length === 0 && <p className="empty-state">No photos found.</p>}
       </div>
@@ -51,14 +52,16 @@ export function PhotoList({ photos, onChanged, onRefresh }: PhotoListProps) {
 
 interface PhotoRowProps {
   photo: PhotoEntry;
+  profiles: WatermarkProfile[];
   onChanged: (photo: PhotoEntry) => void;
   onRefresh: () => void;
 }
 
-function PhotoRow({ photo, onChanged, onRefresh }: PhotoRowProps) {
+function PhotoRow({ photo, profiles, onChanged, onRefresh }: PhotoRowProps) {
   const [draft, setDraft] = useState(() => draftFromPhoto(photo));
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
 
   useEffect(() => {
     setDraft(draftFromPhoto(photo));
@@ -67,6 +70,7 @@ function PhotoRow({ photo, onChanged, onRefresh }: PhotoRowProps) {
   const save = async () => {
     setBusy('save');
     setError('');
+    setNotice('');
 
     try {
       const response = await adminApi.updatePhoto(photo.id, {
@@ -74,12 +78,12 @@ function PhotoRow({ photo, onChanged, onRefresh }: PhotoRowProps) {
         description: draft.description,
         album: draft.album,
         order: Number(draft.order) || 0,
-        tags: draft.tags
-          .split(',')
-          .map((tag) => tag.trim())
-          .filter(Boolean)
+        watermarkProfile: draft.watermarkProfile || null
       });
       onChanged(response.photo);
+      if (response.reprocessQueued) {
+        setNotice('Reprocessing started. The updated image should appear shortly.');
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to save photo.');
     } finally {
@@ -162,10 +166,6 @@ function PhotoRow({ photo, onChanged, onRefresh }: PhotoRowProps) {
               value={draft.album}
             />
           </label>
-          <label>
-            <span>Tags</span>
-            <input onChange={(event) => setDraft({ ...draft, tags: event.currentTarget.value })} value={draft.tags} />
-          </label>
         </div>
 
         <label>
@@ -177,6 +177,24 @@ function PhotoRow({ photo, onChanged, onRefresh }: PhotoRowProps) {
           />
         </label>
 
+        <label>
+          <span>Watermark</span>
+          <select
+            onChange={(event) => setDraft({ ...draft, watermarkProfile: event.currentTarget.value })}
+            value={draft.watermarkProfile}
+          >
+            <option value="">None</option>
+            {draft.watermarkProfile && !profiles.some((profile) => profile.id === draft.watermarkProfile) && (
+              <option value={draft.watermarkProfile}>Unknown: {draft.watermarkProfile}</option>
+            )}
+            {profiles.map((profile) => (
+              <option key={profile.id} value={profile.id}>
+                {profile.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
         <div className="photo-meta">
           <span>{photo.width} x {photo.height}</span>
           <span>{photo.id}</span>
@@ -184,6 +202,7 @@ function PhotoRow({ photo, onChanged, onRefresh }: PhotoRowProps) {
         </div>
 
         {error && <p className="row-error">{error}</p>}
+        {notice && <p className="row-note">{notice}</p>}
 
         <div className="row-actions">
           <button disabled={Boolean(busy)} onClick={() => void save()} type="button">
@@ -215,6 +234,6 @@ function draftFromPhoto(photo: PhotoEntry) {
     description: photo.description,
     album: photo.album,
     order: String(photo.order),
-    tags: photo.tags.join(', ')
+    watermarkProfile: photo.watermarkProfile ?? ''
   };
 }

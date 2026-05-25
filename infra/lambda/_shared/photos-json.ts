@@ -81,7 +81,7 @@ export function normalizePhotosJson(input: PhotosJson): PhotosJson {
   return {
     version: typeof input.version === 'number' ? input.version : 0,
     updatedAt: input.updatedAt ?? new Date(0).toISOString(),
-    photos: Array.isArray(input.photos) ? input.photos : []
+    photos: Array.isArray(input.photos) ? input.photos.map(normalizePhotoEntry).filter(isPhotoEntry) : []
   };
 }
 
@@ -120,9 +120,59 @@ function toGalleryPhoto(photo: PhotoEntry): GalleryPhotoEntry {
     variants: photo.variants,
     width: photo.width,
     height: photo.height,
-    takenAt: photo.takenAt,
-    tags: photo.tags
+    takenAt: photo.takenAt
   };
+}
+
+function normalizePhotoEntry(input: unknown): PhotoEntry | null {
+  if (typeof input !== 'object' || input === null) {
+    return null;
+  }
+
+  const photo = input as Partial<PhotoEntry>;
+  const variants = typeof photo.variants === 'object' && photo.variants !== null ? photo.variants : null;
+  if (!stringValue(photo.id) || !variants || !stringValue(variants.thumb) || !stringValue(variants.medium) || !stringValue(variants.full)) {
+    return null;
+  }
+
+  return {
+    id: stringValue(photo.id),
+    title: stringValue(photo.title),
+    description: stringValue(photo.description),
+    album: stringValue(photo.album),
+    watermarkProfile: normalizeNullableString(photo.watermarkProfile),
+    order: typeof photo.order === 'number' && Number.isFinite(photo.order) ? photo.order : 0,
+    originalKey: stringValue(photo.originalKey),
+    variants: {
+      thumb: stringValue(variants.thumb),
+      medium: stringValue(variants.medium),
+      full: stringValue(variants.full)
+    },
+    width: typeof photo.width === 'number' && Number.isFinite(photo.width) ? photo.width : 0,
+    height: typeof photo.height === 'number' && Number.isFinite(photo.height) ? photo.height : 0,
+    takenAt: typeof photo.takenAt === 'string' ? photo.takenAt : null,
+    createdAt: stringValue(photo.createdAt),
+    updatedAt: stringValue(photo.updatedAt),
+    deleted: photo.deleted === true,
+    deletedAt: typeof photo.deletedAt === 'string' ? photo.deletedAt : null
+  };
+}
+
+function isPhotoEntry(value: PhotoEntry | null): value is PhotoEntry {
+  return value !== null;
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
+function normalizeNullableString(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
 }
 
 export function stripBom(value: string): string {

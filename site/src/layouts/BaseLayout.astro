@@ -1,4 +1,5 @@
 ---
+import { GalleryNav } from '../components/public/GalleryNav';
 import { SiteFooter } from '../components/public/SiteFooter';
 import '../styles/public.css';
 
@@ -58,7 +59,7 @@ const currentPath = Astro.url.pathname;
             Victor Yeung
           </a>
           <nav aria-label="Primary navigation">
-            <a class={currentPath === '/' ? 'is-active' : ''} href="/">Gallery</a>
+            <GalleryNav currentPath={currentPath} client:load />
             <a class={currentPath === '/about' ? 'is-active' : ''} href="/about">About</a>
             <a class={currentPath === '/contact' ? 'is-active' : ''} href="/contact">Contact</a>
           </nav>

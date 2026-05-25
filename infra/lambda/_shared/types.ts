@@ -16,13 +16,13 @@ export interface PhotoEntry {
   title: string;
   description: string;
   album: string;
+  watermarkProfile?: string | null;
   order: number;
   originalKey: string;
   variants: Record<PhotoVariantName, string>;
   width: number;
   height: number;
   takenAt: string | null;
-  tags: string[];
   createdAt: string;
   updatedAt: string;
   deleted?: boolean;
@@ -35,7 +35,10 @@ export interface PhotosJson {
   photos: PhotoEntry[];
 }
 
-export type GalleryPhotoEntry = Omit<PhotoEntry, 'originalKey' | 'createdAt' | 'updatedAt' | 'deleted' | 'deletedAt'>;
+export type GalleryPhotoEntry = Omit<
+  PhotoEntry,
+  'originalKey' | 'createdAt' | 'updatedAt' | 'deleted' | 'deletedAt' | 'watermarkProfile'
+>;
 
 export interface GalleryJson {
   version: number;
@@ -57,6 +60,23 @@ export interface WatermarkConfig {
   opacity: number;
   minWidthPx: number;
   maxWidthPx: number;
+}
+
+export interface WatermarkProfile {
+  id: string;
+  name: string;
+  position: WatermarkPosition;
+  marginPct: number;
+  widthPct: number;
+  opacity: number;
+  minWidthPx: number;
+  maxWidthPx: number;
+}
+
+export interface WatermarkSettings {
+  file: string;
+  defaultProfileForUploads: string | null;
+  profiles: WatermarkProfile[];
 }
 
 export interface SocialLink {

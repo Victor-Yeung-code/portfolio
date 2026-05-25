@@ -216,7 +216,6 @@ function Convert-PhotosToGallery {
       width = $photo.width
       height = $photo.height
       takenAt = $photo.takenAt
-      tags = @($photo.tags)
     }
   }
 
