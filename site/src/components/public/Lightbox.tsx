@@ -25,20 +25,40 @@ const wheelZoomStep = 0.001;
 
 export function Lightbox({ photo, onClose, onNext, onPrev }: LightboxProps) {
   const [highResSrc, setHighResSrc] = useState<string | null>(null);
+  const [isHighResVisible, setIsHighResVisible] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [isZoomed, setIsZoomed] = useState(false);
   const idleTimer = useRef<number | null>(null);
   const pointerStart = useRef<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
+    let isCancelled = false;
     setHighResSrc(null);
+    setIsHighResVisible(false);
     setIsZoomed(false);
+
     const preload = new Image();
-    preload.onload = () => setHighResSrc(photo.variants.full);
+    preload.decoding = 'async';
     preload.src = photo.variants.full;
 
+    void preload
+      .decode()
+      .catch(() => undefined)
+      .then(() => {
+        if (isCancelled) {
+          return;
+        }
+
+        setHighResSrc(photo.variants.full);
+        window.requestAnimationFrame(() => {
+          if (!isCancelled) {
+            setIsHighResVisible(true);
+          }
+        });
+      });
+
     return () => {
-      preload.onload = null;
+      isCancelled = true;
     };
   }, [photo.id, photo.variants.full]);
 
@@ -86,8 +106,6 @@ export function Lightbox({ photo, onClose, onNext, onPrev }: LightboxProps) {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [onClose, onNext, onPrev]);
-
-  const visibleSrc = highResSrc ?? photo.variants.medium;
 
   const handleCanvasPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) {
@@ -158,13 +176,27 @@ export function Lightbox({ photo, onClose, onNext, onPrev }: LightboxProps) {
             }}
             contentClass="lightbox-canvas-content"
           >
-            <img
-              alt={photo.title}
-              draggable={false}
-              height={photo.height}
-              src={visibleSrc}
-              width={photo.width}
-            />
+            <div className={isHighResVisible ? 'lightbox-image-stack is-full-loaded' : 'lightbox-image-stack'}>
+              <img
+                alt={photo.title}
+                className="lightbox-image lightbox-image-medium"
+                draggable={false}
+                height={photo.height}
+                src={photo.variants.medium}
+                width={photo.width}
+              />
+              {highResSrc ? (
+                <img
+                  alt=""
+                  aria-hidden="true"
+                  className="lightbox-image lightbox-image-full"
+                  draggable={false}
+                  height={photo.height}
+                  src={highResSrc}
+                  width={photo.width}
+                />
+              ) : null}
+            </div>
           </TransformComponent>
         )}
       </TransformWrapper>
