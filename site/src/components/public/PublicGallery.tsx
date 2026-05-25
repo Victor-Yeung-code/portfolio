@@ -18,11 +18,14 @@ export function PublicGallery() {
         }
 
         setPhotos(gallery.photos);
-        const hashId = photoIdFromHash();
-        if (hashId) {
-          const index = gallery.photos.findIndex((photo) => photo.id === hashId);
+        const photoId = photoIdFromLocation();
+        if (photoId) {
+          const index = gallery.photos.findIndex((photo) => photo.id === photoId);
           if (index >= 0) {
             setActiveIndex(index);
+            if (photoIdFromHash()) {
+              window.history.replaceState(window.history.state, '', photoUrl(photoId));
+            }
           }
         }
       })
@@ -39,13 +42,13 @@ export function PublicGallery() {
 
   useEffect(() => {
     const onPopState = () => {
-      const hashId = photoIdFromHash();
-      if (!hashId) {
+      const photoId = photoIdFromLocation();
+      if (!photoId) {
         setActiveIndex(null);
         return;
       }
 
-      const index = photos.findIndex((photo) => photo.id === hashId);
+      const index = photos.findIndex((photo) => photo.id === photoId);
       setActiveIndex(index >= 0 ? index : null);
     };
 
@@ -62,9 +65,9 @@ export function PublicGallery() {
       if (event.key === 'Escape') {
         closeLightbox();
       } else if (event.key === 'ArrowRight') {
-        setActiveIndex((current) => nextIndex(current, photos.length, 1));
+        step(1);
       } else if (event.key === 'ArrowLeft') {
-        setActiveIndex((current) => nextIndex(current, photos.length, -1));
+        step(-1);
       }
     };
 
@@ -87,7 +90,7 @@ export function PublicGallery() {
     setActiveIndex(index);
     const photo = photos[index];
     if (photo) {
-      window.history.pushState({ galleryLightbox: true }, '', `#photo-${photo.id}`);
+      window.history.pushState({ galleryLightbox: true }, '', photoUrl(photo.id));
     }
   };
 
@@ -98,8 +101,8 @@ export function PublicGallery() {
     }
 
     setActiveIndex(null);
-    if (photoIdFromHash()) {
-      window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}`);
+    if (photoIdFromLocation()) {
+      window.history.replaceState(window.history.state, '', galleryUrl());
     }
   };
 
@@ -108,7 +111,7 @@ export function PublicGallery() {
       const next = nextIndex(current, photos.length, direction);
       const photo = next === null ? null : photos[next];
       if (photo) {
-        window.history.replaceState({ galleryLightbox: true }, '', `#photo-${photo.id}`);
+        window.history.replaceState({ galleryLightbox: true }, '', photoUrl(photo.id));
       }
       return next;
     });
@@ -130,7 +133,12 @@ export function PublicGallery() {
       <section className="gallery-grid" aria-label="Photo gallery">
         {photos.map((photo, index) => (
           <button className="gallery-card" key={photo.id} onClick={() => openLightbox(index)} type="button">
-            <img alt={photo.title} loading="lazy" src={photo.variants.thumb} />
+            <img
+              alt={photo.title}
+              loading="lazy"
+              src={photo.variants.thumb}
+              srcSet={`${photo.variants.thumb} 1x, ${photo.variants.medium} 2x`}
+            />
             <span>
               <strong>{photo.title}</strong>
               {photo.description && <em>{photo.description}</em>}
@@ -189,9 +197,32 @@ export function PublicGallery() {
   );
 }
 
+function photoIdFromLocation(): string | null {
+  const queryId = new URLSearchParams(window.location.search).get('photo');
+  if (queryId) {
+    return queryId;
+  }
+
+  return photoIdFromHash();
+}
+
 function photoIdFromHash(): string | null {
   const hash = window.location.hash;
   return hash.startsWith('#photo-') ? decodeURIComponent(hash.slice('#photo-'.length)) : null;
+}
+
+function photoUrl(photoId: string): string {
+  const url = new URL(window.location.href);
+  url.searchParams.set('photo', photoId);
+  url.hash = '';
+  return `${url.pathname}${url.search}`;
+}
+
+function galleryUrl(): string {
+  const url = new URL(window.location.href);
+  url.searchParams.delete('photo');
+  url.hash = '';
+  return `${url.pathname}${url.search}`;
 }
 
 function nextIndex(current: number | null, total: number, direction: 1 | -1): number | null {

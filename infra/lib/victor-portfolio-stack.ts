@@ -19,7 +19,9 @@ import * as sns from 'aws-cdk-lib/aws-sns';
 import * as subscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
 import * as sqs from 'aws-cdk-lib/aws-sqs';
 import { Construct } from 'constructs';
+import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { cpSync, existsSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -31,11 +33,10 @@ const DOMAIN_NAME = 'victor-yeung.com';
 const WWW_DOMAIN_NAME = `www.${DOMAIN_NAME}`;
 const CLOUDFRONT_HOSTED_ZONE_ID = 'Z2FDTNDATAQYW2';
 const HOSTED_ZONE_ID = 'Z0659489BL36QJD9CF0F';
-const CACHE_POLICY_CACHING_DISABLED_ID = '4135ea2d-6df8-44a3-9df3-4b5a84be39ad';
 const ORIGIN_REQUEST_POLICY_ALL_VIEWER_EXCEPT_HOST_ID = 'b689b0a8-53d0-40ab-baf2-68738e2966ac';
-const DEFAULT_CONTACT_EMAIL = 'victoryeung564@gmail.com';
 const currentDir = dirname(fileURLToPath(import.meta.url));
 const infraRoot = join(currentDir, '..');
+const repoRoot = join(infraRoot, '..');
 
 export class VictorPortfolioFoundationStack extends Stack {
   constructor(scope: Construct, id: string, props: VictorPortfolioFoundationStackProps) {
@@ -47,10 +48,15 @@ export class VictorPortfolioFoundationStack extends Stack {
     const adminOriginSecret = createHash('sha256')
       .update(`${DOMAIN_NAME}:${adminBasicAuthHeader}`)
       .digest('hex');
-    const contactToEmail = process.env.CONTACT_TO_EMAIL ?? DEFAULT_CONTACT_EMAIL;
-    const contactFromEmail = process.env.CONTACT_FROM_EMAIL ?? contactToEmail;
-    const adminAlertEmail = process.env.ADMIN_ALERT_EMAIL ?? contactToEmail;
+    const contactToEmail = requireAdminEnv('CONTACT_TO_EMAIL');
+    const contactFromEmail = requireAdminEnv('CONTACT_FROM_EMAIL');
+    const adminAlertEmail = requireAdminEnv('ADMIN_ALERT_EMAIL');
     const turnstileSecretKey = process.env.TURNSTILE_SECRET_KEY ?? '';
+
+    const zone = route53.HostedZone.fromHostedZoneAttributes(this, 'HostedZone', {
+      hostedZoneId: HOSTED_ZONE_ID,
+      zoneName: DOMAIN_NAME
+    });
 
     const siteBucket = new s3.Bucket(this, 'SiteBucket', {
       bucketName: 'victor-yeung-site',
@@ -315,65 +321,55 @@ function handler(event) {
       }
     });
 
-    const staticCachePolicy = new cloudfront.CfnCachePolicy(this, 'StaticCachePolicy', {
-      cachePolicyConfig: {
-        name: 'victor-portfolio-static-cache',
-        comment: 'Short static cache while the portfolio is under active build.',
-        defaultTtl: Duration.minutes(5).toSeconds(),
-        maxTtl: Duration.days(1).toSeconds(),
-        minTtl: 0,
-        parametersInCacheKeyAndForwardedToOrigin: {
-          cookiesConfig: { cookieBehavior: 'none' },
-          enableAcceptEncodingBrotli: true,
-          enableAcceptEncodingGzip: true,
-          headersConfig: { headerBehavior: 'none' },
-          queryStringsConfig: { queryStringBehavior: 'none' }
-        }
-      }
+    const staticCachePolicy = new cloudfront.CachePolicy(this, 'StaticCachePolicy', {
+      cachePolicyName: 'victor-portfolio-static-cache',
+      comment: 'Short static cache while the portfolio is under active build.',
+      defaultTtl: Duration.minutes(5),
+      enableAcceptEncodingBrotli: true,
+      enableAcceptEncodingGzip: true,
+      maxTtl: Duration.days(1),
+      minTtl: Duration.seconds(0)
     });
+    (staticCachePolicy.node.defaultChild as cloudfront.CfnCachePolicy).overrideLogicalId('StaticCachePolicy');
 
-    const dataCachePolicy = new cloudfront.CfnCachePolicy(this, 'DataCachePolicy', {
-      cachePolicyConfig: {
-        name: 'victor-portfolio-data-cache',
-        comment: 'Low TTL for JSON metadata used by the gallery/admin pipeline.',
-        defaultTtl: Duration.seconds(60).toSeconds(),
-        maxTtl: Duration.minutes(5).toSeconds(),
-        minTtl: 0,
-        parametersInCacheKeyAndForwardedToOrigin: {
-          cookiesConfig: { cookieBehavior: 'none' },
-          enableAcceptEncodingBrotli: true,
-          enableAcceptEncodingGzip: true,
-          headersConfig: { headerBehavior: 'none' },
-          queryStringsConfig: { queryStringBehavior: 'none' }
-        }
-      }
+    const dataCachePolicy = new cloudfront.CachePolicy(this, 'DataCachePolicy', {
+      cachePolicyName: 'victor-portfolio-data-cache',
+      comment: 'Low TTL for JSON metadata used by the gallery/admin pipeline.',
+      defaultTtl: Duration.seconds(60),
+      enableAcceptEncodingBrotli: true,
+      enableAcceptEncodingGzip: true,
+      maxTtl: Duration.minutes(5),
+      minTtl: Duration.seconds(0)
     });
+    (dataCachePolicy.node.defaultChild as cloudfront.CfnCachePolicy).overrideLogicalId('DataCachePolicy');
 
-    const securityHeadersPolicy = new cloudfront.CfnResponseHeadersPolicy(this, 'SecurityHeadersPolicy', {
-      responseHeadersPolicyConfig: {
-        name: 'victor-portfolio-security-headers',
-        comment: 'Security headers for Victor Yeung portfolio responses.',
-        securityHeadersConfig: {
-          contentTypeOptions: { override: true },
-          frameOptions: { frameOption: 'DENY', override: true },
-          referrerPolicy: { referrerPolicy: 'strict-origin-when-cross-origin', override: true },
-          strictTransportSecurity: {
-            accessControlMaxAgeSec: Duration.days(365).toSeconds(),
-            includeSubdomains: true,
-            override: true
+    const securityHeadersPolicy = new cloudfront.ResponseHeadersPolicy(this, 'SecurityHeadersPolicy', {
+      responseHeadersPolicyName: 'victor-portfolio-security-headers',
+      comment: 'Security headers for Victor Yeung portfolio responses.',
+      customHeadersBehavior: {
+        customHeaders: [
+          {
+            header: 'Permissions-Policy',
+            override: true,
+            value: 'camera=(), microphone=(), geolocation=()'
           }
+        ]
+      },
+      securityHeadersBehavior: {
+        contentTypeOptions: { override: true },
+        frameOptions: { frameOption: cloudfront.HeadersFrameOption.DENY, override: true },
+        referrerPolicy: {
+          override: true,
+          referrerPolicy: cloudfront.HeadersReferrerPolicy.STRICT_ORIGIN_WHEN_CROSS_ORIGIN
         },
-        customHeadersConfig: {
-          items: [
-            {
-              header: 'Permissions-Policy',
-              override: true,
-              value: 'camera=(), microphone=(), geolocation=()'
-            }
-          ]
+        strictTransportSecurity: {
+          accessControlMaxAge: Duration.days(365),
+          includeSubdomains: true,
+          override: true
         }
       }
     });
+    (securityHeadersPolicy.node.defaultChild as cloudfront.CfnResponseHeadersPolicy).overrideLogicalId('SecurityHeadersPolicy');
 
     const imageReprocessDlq = new sqs.Queue(this, 'ImageReprocessDlq', {
       queueName: 'image-reprocess-dlq',
@@ -408,8 +404,36 @@ function handler(event) {
     });
     imageReprocessDlqAlarm.addAlarmAction(new cloudwatchActions.SnsAction(alertTopic));
 
+    const sharpSourceDir = join(infraRoot, 'layers', 'sharp');
     const sharpLayer = new lambda.LayerVersion(this, 'SharpLayer', {
-      code: lambda.Code.fromAsset(join(infraRoot, 'layers', 'sharp')),
+      code: lambda.Code.fromAsset(sharpSourceDir, {
+        bundling: {
+          command: [
+            'bash',
+            '-c',
+            'cd nodejs && npm install --omit=dev --os=linux --cpu=x64 --libc=glibc && cd .. && cp -r nodejs /asset-output/'
+          ],
+          image: lambda.Runtime.NODEJS_22_X.bundlingImage,
+          local: {
+            tryBundle(outputDir: string): boolean {
+              try {
+                const nodejsSource = join(sharpSourceDir, 'nodejs');
+                const nodejsDest = join(outputDir, 'nodejs');
+                execSync(`${shellQuote(resolveNpmCommand())} install --omit=dev --os=linux --cpu=x64 --libc=glibc`, {
+                  cwd: nodejsSource,
+                  stdio: 'inherit'
+                });
+                rmSync(nodejsDest, { force: true, recursive: true });
+                cpSync(nodejsSource, nodejsDest, { recursive: true });
+                return true;
+              } catch {
+                return false;
+              }
+            }
+          },
+          platform: 'linux/amd64'
+        }
+      }),
       compatibleArchitectures: [lambda.Architecture.X86_64],
       compatibleRuntimes: [lambda.Runtime.NODEJS_22_X],
       description: 'Sharp image processing dependency for Victor Portfolio.'
@@ -430,7 +454,7 @@ function handler(event) {
       },
       layers: [sharpLayer],
       logRetention: logs.RetentionDays.ONE_MONTH,
-      memorySize: 3008,
+      memorySize: 1536,
       runtime: lambda.Runtime.NODEJS_22_X,
       timeout: Duration.seconds(30)
     });
@@ -439,7 +463,7 @@ function handler(event) {
     imageReprocessQueue.grantConsumeMessages(imageProcessor);
     imageProcessor.addEventSource(new SqsEventSource(imageReprocessQueue, { batchSize: 1 }));
     photosBucket.addEventNotification(
-      s3.EventType.OBJECT_CREATED_PUT,
+      s3.EventType.OBJECT_CREATED,
       new s3n.LambdaDestination(imageProcessor),
       { prefix: 'originals/' }
     );
@@ -511,15 +535,22 @@ function handler(event) {
         resources: [imageReprocessQueue.queueArn]
       })
     );
-    adminApi.addToRolePolicy(
-      new iam.PolicyStatement({
-        actions: ['cloudfront:CreateInvalidation', 'cloudfront:ListDistributions'],
-        resources: ['*']
-      })
-    );
+    new ses.EmailIdentity(this, 'SiteEmailIdentity', {
+      dkimIdentity: ses.DkimIdentity.easyDkim(ses.EasyDkimSigningKeyLength.RSA_2048_BIT),
+      dkimSigning: true,
+      identity: ses.Identity.publicHostedZone(zone),
+      mailFromDomain: `mail.${DOMAIN_NAME}`
+    });
+
+    new route53.TxtRecord(this, 'DmarcRecord', {
+      recordName: '_dmarc',
+      ttl: Duration.minutes(5),
+      values: [`v=DMARC1; p=none; rua=mailto:${adminAlertEmail}`],
+      zone
+    });
 
     new ses.CfnEmailIdentity(this, 'ContactFromEmailIdentity', {
-      emailIdentity: contactFromEmail
+      emailIdentity: contactToEmail
     });
 
     const contactApi = new NodejsFunction(this, 'ContactApi', {
@@ -591,7 +622,7 @@ function handler(event) {
     const apiCacheBehavior = {
       allowedMethods: ['DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT'],
       cachedMethods: ['GET', 'HEAD', 'OPTIONS'],
-      cachePolicyId: CACHE_POLICY_CACHING_DISABLED_ID,
+      cachePolicyId: cloudfront.CachePolicy.CACHING_DISABLED.cachePolicyId,
       compress: true,
       functionAssociations: [
         {
@@ -600,7 +631,7 @@ function handler(event) {
         }
       ],
       originRequestPolicyId: ORIGIN_REQUEST_POLICY_ALL_VIEWER_EXCEPT_HOST_ID,
-      responseHeadersPolicyId: securityHeadersPolicy.ref,
+      responseHeadersPolicyId: securityHeadersPolicy.responseHeadersPolicyId,
       targetOriginId: 'admin-api-origin',
       viewerProtocolPolicy: 'redirect-to-https'
     };
@@ -608,7 +639,7 @@ function handler(event) {
     const contactApiCacheBehavior = {
       allowedMethods: ['DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT'],
       cachedMethods: ['GET', 'HEAD', 'OPTIONS'],
-      cachePolicyId: CACHE_POLICY_CACHING_DISABLED_ID,
+      cachePolicyId: cloudfront.CachePolicy.CACHING_DISABLED.cachePolicyId,
       compress: true,
       functionAssociations: [
         {
@@ -617,7 +648,7 @@ function handler(event) {
         }
       ],
       originRequestPolicyId: ORIGIN_REQUEST_POLICY_ALL_VIEWER_EXCEPT_HOST_ID,
-      responseHeadersPolicyId: securityHeadersPolicy.ref,
+      responseHeadersPolicyId: securityHeadersPolicy.responseHeadersPolicyId,
       targetOriginId: 'admin-api-origin',
       viewerProtocolPolicy: 'redirect-to-https'
     };
@@ -643,7 +674,7 @@ function handler(event) {
         defaultCacheBehavior: {
           allowedMethods: ['GET', 'HEAD', 'OPTIONS'],
           cachedMethods: ['GET', 'HEAD', 'OPTIONS'],
-          cachePolicyId: staticCachePolicy.ref,
+          cachePolicyId: staticCachePolicy.cachePolicyId,
           compress: true,
           functionAssociations: [
             {
@@ -651,7 +682,7 @@ function handler(event) {
               functionArn: redirectWwwFunction.functionArn
             }
           ],
-          responseHeadersPolicyId: securityHeadersPolicy.ref,
+          responseHeadersPolicyId: securityHeadersPolicy.responseHeadersPolicyId,
           targetOriginId: 'site-origin',
           viewerProtocolPolicy: 'redirect-to-https'
         },
@@ -710,7 +741,7 @@ function handler(event) {
             pathPattern: '/admin*',
             allowedMethods: ['GET', 'HEAD', 'OPTIONS'],
             cachedMethods: ['GET', 'HEAD', 'OPTIONS'],
-            cachePolicyId: staticCachePolicy.ref,
+            cachePolicyId: staticCachePolicy.cachePolicyId,
             compress: true,
             functionAssociations: [
               {
@@ -718,7 +749,7 @@ function handler(event) {
                 functionArn: adminBasicAuthFunction.functionArn
               }
             ],
-            responseHeadersPolicyId: securityHeadersPolicy.ref,
+            responseHeadersPolicyId: securityHeadersPolicy.responseHeadersPolicyId,
             targetOriginId: 'site-origin',
             viewerProtocolPolicy: 'redirect-to-https'
           },
@@ -726,7 +757,7 @@ function handler(event) {
             pathPattern: '/photos/*',
             allowedMethods: ['GET', 'HEAD', 'OPTIONS'],
             cachedMethods: ['GET', 'HEAD', 'OPTIONS'],
-            cachePolicyId: staticCachePolicy.ref,
+            cachePolicyId: staticCachePolicy.cachePolicyId,
             compress: true,
             functionAssociations: [
               {
@@ -734,7 +765,7 @@ function handler(event) {
                 functionArn: rewritePhotosFunction.functionArn
               }
             ],
-            responseHeadersPolicyId: securityHeadersPolicy.ref,
+            responseHeadersPolicyId: securityHeadersPolicy.responseHeadersPolicyId,
             targetOriginId: 'photos-origin',
             viewerProtocolPolicy: 'redirect-to-https'
           },
@@ -742,7 +773,7 @@ function handler(event) {
             pathPattern: '/data/*',
             allowedMethods: ['GET', 'HEAD', 'OPTIONS'],
             cachedMethods: ['GET', 'HEAD', 'OPTIONS'],
-            cachePolicyId: dataCachePolicy.ref,
+            cachePolicyId: dataCachePolicy.cachePolicyId,
             compress: true,
             functionAssociations: [
               {
@@ -750,7 +781,7 @@ function handler(event) {
                 functionArn: publicDataFunction.functionArn
               }
             ],
-            responseHeadersPolicyId: securityHeadersPolicy.ref,
+            responseHeadersPolicyId: securityHeadersPolicy.responseHeadersPolicyId,
             targetOriginId: 'photos-origin',
             viewerProtocolPolicy: 'redirect-to-https'
           }
@@ -767,6 +798,14 @@ function handler(event) {
       distribution.ref
     ]);
 
+    adminApi.addEnvironment('DISTRIBUTION_ID', distribution.ref);
+    adminApi.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['cloudfront:CreateInvalidation'],
+        resources: [distributionArn]
+      })
+    );
+
     for (const bucket of [siteBucket, photosBucket]) {
       bucket.addToResourcePolicy(
         new iam.PolicyStatement({
@@ -781,11 +820,6 @@ function handler(event) {
         })
       );
     }
-
-    const zone = route53.HostedZone.fromHostedZoneAttributes(this, 'HostedZone', {
-      hostedZoneId: HOSTED_ZONE_ID,
-      zoneName: DOMAIN_NAME
-    });
 
     const distributionAliasTarget: route53.IAliasRecordTarget = {
       bind: () => ({
@@ -839,4 +873,25 @@ function requireAdminEnv(name: string): string {
   }
 
   return value;
+}
+
+function resolveNpmCommand(): string {
+  if (process.env.NPM_PATH && existsSync(process.env.NPM_PATH)) {
+    return process.env.NPM_PATH;
+  }
+
+  const localNpm = join(repoRoot, 'tools', 'node', 'node-v24.14.0-win-x64', process.platform === 'win32' ? 'npm.cmd' : 'npm');
+  if (existsSync(localNpm)) {
+    return localNpm;
+  }
+
+  return process.platform === 'win32' ? 'npm.cmd' : 'npm';
+}
+
+function shellQuote(value: string): string {
+  if (process.platform === 'win32') {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }

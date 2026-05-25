@@ -14,7 +14,7 @@
 Run from the repo root:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\infra\scripts\deploy-m1.ps1
+powershell -ExecutionPolicy Bypass -File .\infra\scripts\deploy.ps1
 ```
 
 The script builds CDK, deploys both stacks, builds Astro, seeds `data/site.json` if it does not exist, regenerates `data/gallery.json`, syncs `site/dist` to S3, and invalidates CloudFront.
@@ -25,9 +25,9 @@ The script builds CDK, deploys both stacks, builds Astro, seeds `data/site.json`
 | --- | --- | --- | --- |
 | `ADMIN_USERNAME` | `infra/.env` | Admin Basic Auth user | CDK deploy stops |
 | `ADMIN_PASSWORD` | `infra/.env` | Admin Basic Auth password | CDK deploy stops |
-| `CONTACT_TO_EMAIL` | `infra/.env` | Inbox for contact submissions | Defaults to `victoryeung564@gmail.com` |
-| `CONTACT_FROM_EMAIL` | `infra/.env` | SES sender identity | Defaults to `CONTACT_TO_EMAIL` |
-| `ADMIN_ALERT_EMAIL` | `infra/.env` | SNS alert recipient for DLQ alarms | Defaults to `CONTACT_TO_EMAIL` |
+| `CONTACT_TO_EMAIL` | `infra/.env` | Inbox for contact submissions | CDK deploy stops |
+| `CONTACT_FROM_EMAIL` | `infra/.env` | SES sender identity, usually `noreply@victor-yeung.com` | CDK deploy stops |
+| `ADMIN_ALERT_EMAIL` | `infra/.env` | SNS alert recipient for DLQ alarms and DMARC reports | CDK deploy stops |
 | `TURNSTILE_SECRET_KEY` | `infra/.env` | Server-side Cloudflare Turnstile verification | Turnstile check is skipped |
 | `PUBLIC_GA_ID` | `site/.env` | Google Analytics measurement ID | Analytics is disabled |
 | `PUBLIC_TURNSTILE_SITEKEY` | `site/.env` | Client-side Turnstile widget key | Widget is hidden |
@@ -36,14 +36,14 @@ The script builds CDK, deploys both stacks, builds Astro, seeds `data/site.json`
 
 ## Pre-Launch SES Verification
 
-M5 creates an SES email identity for `CONTACT_FROM_EMAIL` in `us-west-2`. After the first deploy:
+The infrastructure creates a domain identity for `victor-yeung.com` with DKIM, plus a Gmail email identity for the sandbox recipient address. If SES sends a verification email for the recipient identity after a deploy:
 
 1. Open the Gmail inbox for the contact sender address.
 2. Find the AWS verification email. The subject is usually similar to `Amazon Web Services - Email Address Verification Request in region US West (Oregon)`.
 3. Click the verification link in that email.
 4. Confirm the identity status in the SES console: https://us-west-2.console.aws.amazon.com/sesv2/home?region=us-west-2#/identities
 
-The contact form can return `500` until the SES identity is verified. This is an operator step, not a code failure.
+The contact form can return `500` until the sender domain and sandbox recipient identity are verified. This is an operator step, not a code failure.
 
 ## AWS Cost Summary
 

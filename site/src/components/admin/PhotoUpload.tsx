@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import type { DragEvent } from 'react';
 import { adminApi, putSignedObject } from './api';
 
 interface PhotoUploadProps {
@@ -8,6 +9,7 @@ interface PhotoUploadProps {
 
 export function PhotoUpload({ onUploaded, onError }: PhotoUploadProps) {
   const [files, setFiles] = useState<File[]>([]);
+  const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileNames = useMemo(() => files.map((file) => file.name).join(', '), [files]);
 
@@ -20,21 +22,20 @@ export function PhotoUpload({ onUploaded, onError }: PhotoUploadProps) {
     onError('');
 
     try {
-      const ids: string[] = [];
+      const results = await Promise.all(
+        files.map(async (file) => {
+          const contentType = file.type || contentTypeFor(file.name);
+          const uploadUrl = await adminApi.createUploadUrl({
+            filename: file.name,
+            contentType,
+            kind: 'photo'
+          });
 
-      for (const file of files) {
-        const contentType = file.type || contentTypeFor(file.name);
-        const uploadUrl = await adminApi.createUploadUrl({
-          filename: file.name,
-          contentType,
-          kind: 'photo'
-        });
-
-        await putSignedObject(uploadUrl.url, file, uploadUrl.headers);
-        if (uploadUrl.id) {
-          ids.push(uploadUrl.id);
-        }
-      }
+          await putSignedObject(uploadUrl.url, file, uploadUrl.headers);
+          return uploadUrl.id;
+        })
+      );
+      const ids = results.filter((id): id is string => Boolean(id));
 
       setFiles([]);
       onUploaded(ids);
@@ -45,14 +46,39 @@ export function PhotoUpload({ onUploaded, onError }: PhotoUploadProps) {
     }
   };
 
+  const selectFiles = (nextFiles: File[]) => {
+    setFiles(nextFiles.filter((file) => file.type.startsWith('image/') || isSupportedImageName(file.name)));
+  };
+
+  const onDrop = (event: DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setDragActive(false);
+    selectFiles(Array.from(event.dataTransfer.files));
+  };
+
   return (
-    <div className="upload-band">
+    <div
+      className={dragActive ? 'upload-band is-dragging' : 'upload-band'}
+      onDragEnter={(event) => {
+        event.preventDefault();
+        setDragActive(true);
+      }}
+      onDragLeave={(event) => {
+        if (event.currentTarget.contains(event.relatedTarget as Node | null)) {
+          return;
+        }
+
+        setDragActive(false);
+      }}
+      onDragOver={(event) => event.preventDefault()}
+      onDrop={onDrop}
+    >
       <label className="file-picker">
         <span>{fileNames || 'Select photos'}</span>
         <input
           accept="image/avif,image/jpeg,image/png,image/tiff,image/webp"
           multiple
-          onChange={(event) => setFiles(Array.from(event.currentTarget.files ?? []))}
+          onChange={(event) => selectFiles(Array.from(event.currentTarget.files ?? []))}
           type="file"
         />
       </label>
@@ -61,6 +87,12 @@ export function PhotoUpload({ onUploaded, onError }: PhotoUploadProps) {
         {uploading ? 'Uploading' : 'Upload'}
       </button>
     </div>
+  );
+}
+
+function isSupportedImageName(filename: string): boolean {
+  return ['.avif', '.jpg', '.jpeg', '.png', '.tif', '.tiff', '.webp'].some((extension) =>
+    filename.toLowerCase().endsWith(extension)
   );
 }
 

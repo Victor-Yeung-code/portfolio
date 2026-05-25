@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { adminApi } from './api';
 import type { RepublishStatus } from './types';
 
@@ -12,12 +12,15 @@ export function RepublishPanel({ onDone, onError }: RepublishPanelProps) {
   const [queued, setQueued] = useState(0);
   const [processing, setProcessing] = useState(0);
   const [message, setMessage] = useState('');
+  const runIdRef = useRef(0);
 
   const start = async () => {
     if (!window.confirm('Republish all image variants now?')) {
       return;
     }
 
+    const runId = runIdRef.current + 1;
+    runIdRef.current = runId;
     setRunning(true);
     setQueued(0);
     setProcessing(0);
@@ -32,7 +35,11 @@ export function RepublishPanel({ onDone, onError }: RepublishPanelProps) {
       const finalStatus = await waitForQueue((status) => {
         setQueued(status.queued);
         setProcessing(status.processing);
-      });
+      }, () => runIdRef.current === runId);
+
+      if (!finalStatus) {
+        return;
+      }
 
       setQueued(finalStatus.queued);
       setProcessing(finalStatus.processing);
@@ -45,10 +52,20 @@ export function RepublishPanel({ onDone, onError }: RepublishPanelProps) {
       );
       onDone();
     } catch (reason) {
-      onError(reason instanceof Error ? reason.message : 'Republish failed.');
+      if (runIdRef.current === runId) {
+        onError(reason instanceof Error ? reason.message : 'Republish failed.');
+      }
     } finally {
-      setRunning(false);
+      if (runIdRef.current === runId) {
+        setRunning(false);
+      }
     }
+  };
+
+  const cancelPolling = () => {
+    runIdRef.current += 1;
+    setRunning(false);
+    setMessage('Stopped watching. Republish continues in the background.');
   };
 
   return (
@@ -66,17 +83,35 @@ export function RepublishPanel({ onDone, onError }: RepublishPanelProps) {
 
       {message && <p className="republish-message">{message}</p>}
 
-      <button disabled={running} onClick={() => void start()} type="button">
-        {running ? 'Republishing' : 'Republish All'}
-      </button>
+      <div className="republish-actions">
+        <button disabled={running} onClick={() => void start()} type="button">
+          {running ? 'Republishing' : 'Republish All'}
+        </button>
+        {running && (
+          <button className="secondary" onClick={cancelPolling} type="button">
+            Cancel polling
+          </button>
+        )}
+      </div>
     </div>
   );
 }
 
-async function waitForQueue(onStatus: (status: RepublishStatus) => void): Promise<RepublishStatus> {
+async function waitForQueue(
+  onStatus: (status: RepublishStatus) => void,
+  isActive: () => boolean
+): Promise<RepublishStatus | null> {
   for (let attempt = 0; attempt < 240; attempt += 1) {
     await delay(attempt === 0 ? 1500 : 5000);
+    if (!isActive()) {
+      return null;
+    }
+
     const status = await adminApi.republishStatus();
+    if (!isActive()) {
+      return null;
+    }
+
     onStatus(status);
 
     if (status.queued === 0 && status.processing === 0) {

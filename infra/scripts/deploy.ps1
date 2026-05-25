@@ -302,10 +302,6 @@ Write-Host "Deploying portfolio infrastructure in account $accountId"
 Write-Host 'Installing infrastructure dependencies'
 Invoke-Npm $InfraRoot install
 
-Write-Host 'Installing Sharp Lambda layer dependencies for linux x64'
-$sharpLayerNodejs = Join-Path $InfraRoot 'layers\sharp\nodejs'
-Invoke-Npm $sharpLayerNodejs install --omit=dev --os=linux --cpu=x64 --libc=glibc
-
 Write-Host 'Type-checking infrastructure'
 Invoke-Npm $InfraRoot run build
 

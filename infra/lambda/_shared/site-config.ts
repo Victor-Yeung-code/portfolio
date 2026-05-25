@@ -10,7 +10,7 @@ import type { SiteConfig, SocialLink } from './types.js';
 
 export const siteConfigKey = 'data/site.json';
 const bioTextLimit = 15000;
-const bioAllowedTags = ['p', 'br', 'strong', 'em', 'u', 'ul', 'ol', 'li', 'h2', 'h3', 'h4', 'a', 'blockquote'];
+const bioAllowedTags = ['p', 'br', 'strong', 'em', 'u', 'ul', 'ol', 'li', 'h2', 'h3', 'h4', 'a', 'blockquote', 'span'];
 const bioAllowedAttributes = { a: ['href', 'rel', 'target'] };
 
 export const defaultSiteConfig: SiteConfig = {
@@ -128,8 +128,14 @@ export function sanitizeBio(html: string): string {
     allowedSchemes: ['http', 'https', 'mailto'],
     disallowedTagsMode: 'discard',
     transformTags: {
-      a: (_tagName, attribs) => {
-        const href = typeof attribs.href === 'string' ? attribs.href : '';
+      a: (_tagName, attribs): sanitizeHtml.Tag => {
+        const href = typeof attribs.href === 'string' ? attribs.href.trim() : '';
+        if (!href) {
+          return {
+            tagName: 'span',
+            attribs: {} as sanitizeHtml.Attributes
+          };
+        }
 
         return {
           tagName: 'a',

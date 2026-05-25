@@ -100,19 +100,23 @@ export function WatermarkConfigPanel({ response, onChanged, onError }: Watermark
           </button>
         </div>
 
-        <label>
+        <div className="anchor-picker" aria-label="Watermark position">
           <span>Position</span>
-          <select
-            onChange={(event) => setConfig({ ...config, position: event.currentTarget.value as WatermarkConfig['position'] })}
-            value={config.position}
-          >
+          <div className="anchor-grid">
             {watermarkPositions.map((position) => (
-              <option key={position} value={position}>
-                {position}
-              </option>
+              <button
+                aria-label={position}
+                aria-pressed={config.position === position}
+                className={config.position === position ? 'is-active' : ''}
+                key={position}
+                onClick={() => setConfig({ ...config, position })}
+                type="button"
+              >
+                <span className={`anchor-dot is-${position}`} />
+              </button>
             ))}
-          </select>
-        </label>
+          </div>
+        </div>
 
         <div className="slider-grid">
           <label>

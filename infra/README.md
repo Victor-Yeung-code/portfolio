@@ -98,7 +98,7 @@ The contact form posts to `/api/contact`. The Lambda sends mail through SES from
 From the repo root:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\infra\scripts\deploy-m1.ps1
+powershell -ExecutionPolicy Bypass -File .\infra\scripts\deploy.ps1
 ```
 
 The script expects:
@@ -106,8 +106,8 @@ The script expects:
 - AWS CLI v2 configured with the `default` profile
 - Node.js 22+ with npm available
 - Existing Route 53 hosted zone `victor-yeung.com`
-- `ADMIN_USERNAME` and `ADMIN_PASSWORD` in `infra/.env` or the current shell
-- Optional `CONTACT_TO_EMAIL`, `CONTACT_FROM_EMAIL`, `ADMIN_ALERT_EMAIL`, and `TURNSTILE_SECRET_KEY` in `infra/.env`
+- `ADMIN_USERNAME`, `ADMIN_PASSWORD`, `CONTACT_TO_EMAIL`, `CONTACT_FROM_EMAIL`, and `ADMIN_ALERT_EMAIL` in `infra/.env` or the current shell
+- Optional `TURNSTILE_SECRET_KEY` in `infra/.env`
 
 On this machine, the script also detects the local portable Node/npm under `tools/`.
 
@@ -129,7 +129,7 @@ aws cloudfront create-invalidation --distribution-id <DISTRIBUTION_ID> --paths "
 For infrastructure deploy failures, CloudFormation automatically rolls back failed stack updates. For a successful but incorrect infrastructure change, revert the commit and rerun:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\infra\scripts\deploy-m1.ps1
+powershell -ExecutionPolicy Bypass -File .\infra\scripts\deploy.ps1
 ```
 
 For a structural change that needs CloudFormation rollback:

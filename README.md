@@ -32,7 +32,7 @@ The M1 implementation lives in:
 M1 intentionally does not include GitHub Actions yet. Deploy manually with:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\infra\scripts\deploy-m1.ps1
+powershell -ExecutionPolicy Bypass -File .\infra\scripts\deploy.ps1
 ```
 
 M1 sets up:
@@ -129,7 +129,7 @@ M5 adds:
 - Security response headers, one-month Lambda log retention, and SNS email alerts for the image reprocess DLQ
 - `robots.txt`, `sitemap.xml`, and public nav/footer
 
-Contact emails currently use `victoryeung564@gmail.com` as the sender and recipient. AWS SES will send a verification email for that identity during deployment; contact delivery will not work until that verification is accepted. Cloudflare Turnstile is optional for now and can be enabled later with `PUBLIC_TURNSTILE_SITEKEY` in `site/.env` and `TURNSTILE_SECRET_KEY` in `infra/.env`.
+Contact emails send from the verified `victor-yeung.com` SES domain identity, with `CONTACT_FROM_EMAIL` set to `noreply@victor-yeung.com` in `infra/.env`. Because the SES account is still in sandbox mode, `CONTACT_TO_EMAIL` must also remain a verified SES recipient identity. Cloudflare Turnstile is optional for now and can be enabled later with `PUBLIC_TURNSTILE_SITEKEY` in `site/.env` and `TURNSTILE_SECRET_KEY` in `infra/.env`.
 
 ## Analytics
 
@@ -159,7 +159,7 @@ aws cloudfront create-invalidation --distribution-id <DISTRIBUTION_ID> --paths "
 For infrastructure deploy failures, CloudFormation automatically rolls back failed stack updates. For a successful but incorrect infrastructure change, revert the commit and rerun:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\infra\scripts\deploy-m1.ps1
+powershell -ExecutionPolicy Bypass -File .\infra\scripts\deploy.ps1
 ```
 
 For a structural change that needs CloudFormation rollback:

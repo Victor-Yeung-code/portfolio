@@ -1,4 +1,4 @@
-import { CloudFrontClient, CreateInvalidationCommand, ListDistributionsCommand } from '@aws-sdk/client-cloudfront';
+import { CloudFrontClient, CreateInvalidationCommand } from '@aws-sdk/client-cloudfront';
 import { InvokeCommand, LambdaClient } from '@aws-sdk/client-lambda';
 import {
   DeleteObjectCommand,
@@ -25,11 +25,11 @@ const photosBucket = requiredEnv('PHOTOS_BUCKET');
 const republishFunctionName = requiredEnv('REPUBLISH_FUNCTION_NAME');
 const queueUrl = requiredEnv('REPROCESS_QUEUE_URL');
 const adminOriginSecret = requiredEnv('ADMIN_ORIGIN_SECRET');
+const distributionId = requiredEnv('DISTRIBUTION_ID');
 const domainName = requiredEnv('DOMAIN_NAME');
 const watermarkJsonKey = 'data/watermark.json';
 const photoContentTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/tiff', 'image/avif']);
 const watermarkPositionSet = new Set<string>(watermarkPositions);
-let distributionIdPromise: Promise<string> | undefined;
 
 export const handler = async (event: APIGatewayProxyEventV2): Promise<APIGatewayProxyResultV2> => {
   try {
@@ -358,7 +358,7 @@ async function getRepublishStatus(): Promise<{ queued: number; processing: numbe
 async function invalidatePhotos(): Promise<{ invalidationId?: string }> {
   const response = await cloudFront.send(
     new CreateInvalidationCommand({
-      DistributionId: await resolveDistributionId(),
+      DistributionId: distributionId,
       InvalidationBatch: {
         CallerReference: `admin-republish-${Date.now()}`,
         Paths: {
@@ -370,29 +370,6 @@ async function invalidatePhotos(): Promise<{ invalidationId?: string }> {
   );
 
   return { invalidationId: response.Invalidation?.Id };
-}
-
-async function resolveDistributionId(): Promise<string> {
-  distributionIdPromise ??= findDistributionId();
-  return distributionIdPromise;
-}
-
-async function findDistributionId(): Promise<string> {
-  let marker: string | undefined;
-
-  do {
-    const response = await cloudFront.send(new ListDistributionsCommand({ Marker: marker }));
-
-    for (const item of response.DistributionList?.Items ?? []) {
-      if ((item.Aliases?.Items ?? []).includes(domainName) && item.Id) {
-        return item.Id;
-      }
-    }
-
-    marker = response.DistributionList?.NextMarker;
-  } while (marker);
-
-  throw new Error(`CloudFront distribution with alias ${domainName} was not found.`);
 }
 
 function normalizeWatermarkConfig(input: Partial<WatermarkConfig>): WatermarkConfig | null {

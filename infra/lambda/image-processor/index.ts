@@ -263,7 +263,7 @@ async function renderWebpVariant(
 
   return {
     key,
-    body: await pipeline.webp({ quality: 82, effort: 0 }).toBuffer(),
+    body: await pipeline.webp({ quality: 82, effort: 4 }).toBuffer(),
     contentType: 'image/webp'
   };
 }
@@ -286,7 +286,7 @@ async function renderFullVariant(
   }
 
   pipeline = await applyWatermark(pipeline, dimensions, watermark);
-  pipeline = encodeFullVariant(pipeline.withMetadata(), extension);
+  pipeline = encodeFullVariant(pipeline.keepMetadata(), extension);
 
   return {
     key,
@@ -540,14 +540,14 @@ function encodeFullVariant(pipeline: sharp.Sharp, extension: string): sharp.Shar
     case '.avif':
       return pipeline.avif({ quality: 80 });
     case '.png':
-      return pipeline.png();
+      return pipeline.png({ compressionLevel: 9 });
     case '.tif':
     case '.tiff':
       return pipeline.tiff();
     case '.webp':
       return pipeline.webp({ quality: 90 });
     default:
-      return pipeline.jpeg({ quality: 92 });
+      return pipeline.jpeg({ quality: 90 });
   }
 }
 
