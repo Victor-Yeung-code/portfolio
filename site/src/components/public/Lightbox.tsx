@@ -9,6 +9,8 @@ interface LightboxProps {
   onPrev: () => void;
 }
 
+const wheelZoomStep = 0.001;
+
 export function Lightbox({ photo, onClose, onNext, onPrev }: LightboxProps) {
   const [highResSrc, setHighResSrc] = useState<string | null>(null);
   const [controlsVisible, setControlsVisible] = useState(true);
@@ -87,8 +89,9 @@ export function Lightbox({ photo, onClose, onNext, onPrev }: LightboxProps) {
         minScale={1}
         onTransform={(_, state) => setIsZoomed(state.scale > 1.001)}
         pinch={{ step: 5 }}
+        smooth
         velocityAnimation={{ disabled: false }}
-        wheel={{ step: 0.1, smoothStep: 0.001 }}
+        wheel={{ step: wheelZoomStep }}
       >
         <TransformComponent
           wrapperClass={isZoomed ? 'lightbox-canvas is-zoomed' : 'lightbox-canvas'}
