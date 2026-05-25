@@ -15,7 +15,8 @@
     "@tiptap/starter-kit": "^3.23.6",
     "astro": "^5.0.0",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "react-zoom-pan-pinch": "^4.0.3"
   },
   "devDependencies": {
     "@types/react": "^19.2.15",

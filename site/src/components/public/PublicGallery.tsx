@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { fetchGallery, type GalleryPhoto } from '../../lib/public-data';
 import { slugify } from '../../lib/slug';
+import { Lightbox } from './Lightbox';
 
 type AlbumOption = [slug: string, label: string];
 
@@ -81,25 +82,6 @@ export function PublicGallery() {
   }, [photos]);
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (activeIndex === null) {
-        return;
-      }
-
-      if (event.key === 'Escape') {
-        closeLightbox();
-      } else if (event.key === 'ArrowRight') {
-        step(1);
-      } else if (event.key === 'ArrowLeft') {
-        step(-1);
-      }
-    };
-
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [activeIndex, filteredPhotos.length]);
-
-  useEffect(() => {
     document.body.classList.toggle('has-lightbox', activeIndex !== null);
     return () => document.body.classList.remove('has-lightbox');
   }, [activeIndex]);
@@ -177,47 +159,7 @@ export function PublicGallery() {
       </section>
 
       {activePhoto && (
-        <div className="lightbox" onMouseDown={closeLightbox} role="dialog" aria-modal="true" aria-label={activePhoto.title}>
-          <button
-            className="lightbox-close"
-            onClick={closeLightbox}
-            onMouseDown={(event) => event.stopPropagation()}
-            type="button"
-            aria-label="Close"
-          >
-            X
-          </button>
-          <button
-            className="lightbox-nav is-prev"
-            onClick={(event) => { event.stopPropagation(); step(-1); }}
-            onMouseDown={(event) => event.stopPropagation()}
-            type="button"
-            aria-label="Previous photo"
-          >
-            &lt;
-          </button>
-          <figure onMouseDown={(event) => event.stopPropagation()}>
-            <img alt={activePhoto.title} src={activePhoto.variants.medium} />
-            <figcaption>
-              <span>
-                <strong>{activePhoto.title}</strong>
-                {activePhoto.description && <em>{activePhoto.description}</em>}
-              </span>
-              <a href={activePhoto.variants.full} download>
-                Download
-              </a>
-            </figcaption>
-          </figure>
-          <button
-            className="lightbox-nav is-next"
-            onClick={(event) => { event.stopPropagation(); step(1); }}
-            onMouseDown={(event) => event.stopPropagation()}
-            type="button"
-            aria-label="Next photo"
-          >
-            &gt;
-          </button>
-        </div>
+        <Lightbox photo={activePhoto} onClose={closeLightbox} onNext={() => step(1)} onPrev={() => step(-1)} />
       )}
     </>
   );
