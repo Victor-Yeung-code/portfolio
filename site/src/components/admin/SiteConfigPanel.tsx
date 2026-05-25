@@ -192,25 +192,14 @@ export function SiteConfigPanel({ site, onChanged, onError }: SiteConfigPanelPro
           </small>
         </label>
 
-        <div className="field-grid two-up">
-          <label>
-            <span>Email</span>
-            <input
-              maxLength={320}
-              onChange={(event) => setDraft({ ...draft, email: event.currentTarget.value })}
-              type="email"
-              value={draft.email}
-            />
-          </label>
-          <label>
-            <span>Footer</span>
-            <input
-              maxLength={200}
-              onChange={(event) => setDraft({ ...draft, footer: event.currentTarget.value })}
-              value={draft.footer}
-            />
-          </label>
-        </div>
+        <label>
+          <span>Footer</span>
+          <input
+            maxLength={200}
+            onChange={(event) => setDraft({ ...draft, footer: event.currentTarget.value })}
+            value={draft.footer}
+          />
+        </label>
 
         <div className="social-editor">
           <div className="mini-heading">

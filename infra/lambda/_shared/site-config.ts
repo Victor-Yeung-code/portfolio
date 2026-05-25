@@ -17,7 +17,6 @@ export const defaultSiteConfig: SiteConfig = {
   name: 'Victor Yeung',
   tagline: 'Art & Photography',
   bio: '<p>Victor Yeung is building a new photography portfolio. A fuller artist statement and biography will be added soon.</p>',
-  email: 'victoryeung564@gmail.com',
   social: [],
   footer: 'Copyright 2026 Victor Yeung'
 };
@@ -54,7 +53,6 @@ export function normalizeSiteConfig(input: Partial<SiteConfig>): SiteConfig {
     name: cleanString(input.name, defaultSiteConfig.name, 80),
     tagline: cleanString(input.tagline, defaultSiteConfig.tagline, 120),
     bio: normalizeBio(input.bio),
-    email: cleanString(input.email, defaultSiteConfig.email, 320),
     social: normalizeSocialLinks(input.social),
     footer: cleanString(input.footer, defaultSiteConfig.footer, 200)
   };
@@ -69,10 +67,6 @@ export function validateSiteConfig(input: Partial<SiteConfig>): SiteConfig {
 
   if (plainTextLength(config.bio) > bioTextLimit) {
     throw new Error('Bio must be 15000 characters or fewer.');
-  }
-
-  if (config.email && !isEmail(config.email)) {
-    throw new Error('Email must be valid.');
   }
 
   for (const link of config.social) {
@@ -175,10 +169,6 @@ function escapeHtml(value: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
-}
-
-function isEmail(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
 function isHttpUrl(value: string): boolean {

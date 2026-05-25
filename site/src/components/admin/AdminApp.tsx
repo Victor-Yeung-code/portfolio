@@ -20,7 +20,6 @@ const emptySite: SiteConfig = {
   name: 'Victor Yeung',
   tagline: 'Art & Photography',
   bio: '',
-  email: 'victoryeung564@gmail.com',
   social: [],
   footer: 'Copyright 2026 Victor Yeung'
 };

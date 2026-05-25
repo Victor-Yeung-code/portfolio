@@ -27,7 +27,6 @@ export interface SiteConfig {
   name: string;
   tagline: string;
   bio: string;
-  email: string;
   social: SocialLink[];
   footer: string;
 }
@@ -36,7 +35,6 @@ export const defaultSiteConfig: SiteConfig = {
   name: 'Victor Yeung',
   tagline: 'Art & Photography',
   bio: '<p>Victor Yeung is building a new photography portfolio. A fuller artist statement and biography will be added soon.</p>',
-  email: 'victoryeung564@gmail.com',
   social: [],
   footer: 'Copyright 2026 Victor Yeung'
 };
@@ -125,7 +123,6 @@ function normalizeSiteConfig(input: Partial<SiteConfig>): SiteConfig {
     name: stringValue(input.name, defaultSiteConfig.name),
     tagline: stringValue(input.tagline, defaultSiteConfig.tagline),
     bio: stringValue(input.bio, defaultSiteConfig.bio),
-    email: stringValue(input.email, defaultSiteConfig.email),
     social: Array.isArray(input.social) ? input.social.filter(isSocialLink).slice(0, 8) : [],
     footer: stringValue(input.footer, defaultSiteConfig.footer)
   };
