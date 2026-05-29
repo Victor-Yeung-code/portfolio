@@ -410,6 +410,24 @@ async function updateProfile(
   const photos = (await readPhotosJson(s3, photosBucket)).data.photos.filter(
     (photo) => (photo.watermarkProfile ?? null) === safeId
   );
+
+  if (photos.length > 0) {
+    const affectedIds = new Set(photos.map((photo) => photo.id));
+    const now = new Date().toISOString();
+    await updatePhotosJson(s3, photosBucket, (current) => ({
+      version: current.version + 1,
+      updatedAt: now,
+      photos: current.photos.map((photo) =>
+        affectedIds.has(photo.id)
+          ? {
+              ...photo,
+              updatedAt: now
+            }
+          : photo
+      )
+    }));
+  }
+
   await sendReprocessMessages(photos.map((photo) => photo.originalKey));
 
   return {

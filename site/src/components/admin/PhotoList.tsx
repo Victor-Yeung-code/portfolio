@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { adminApi } from './api';
+import { refreshPhotoCache, waitForRepublishQueue } from './republish-queue';
 import type { PhotoEntry, WatermarkProfile } from './types';
 
 interface PhotoListProps {
@@ -82,7 +83,10 @@ function PhotoRow({ photo, profiles, onChanged, onRefresh }: PhotoRowProps) {
       });
       onChanged(response.photo);
       if (response.reprocessQueued) {
-        setNotice('Reprocessing started. The updated image should appear shortly.');
+        setNotice('Reprocessing image variants.');
+        await waitForRepublishQueue();
+        setNotice('Refreshing cached image variants.');
+        setNotice(await refreshPhotoCache());
       }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to save photo.');

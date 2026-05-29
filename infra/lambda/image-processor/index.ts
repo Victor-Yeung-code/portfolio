@@ -158,8 +158,8 @@ async function handleCreated(
   };
 
   const [thumb, medium, full] = await Promise.all([
-    renderWebpVariant(baseImage.clone(), resizeToWidth(dimensions, 400), variantKeys.thumb, watermark),
-    renderWebpVariant(baseImage.clone(), resizeToWidth(dimensions, 1200), variantKeys.medium, watermark),
+    renderWebpVariant(baseImage.clone(), dimensions, resizeToWidth(dimensions, 400), variantKeys.thumb, watermark),
+    renderWebpVariant(baseImage.clone(), dimensions, resizeToWidth(dimensions, 1200), variantKeys.medium, watermark),
     renderFullVariant(
       baseImage.clone(),
       dimensions,
@@ -221,7 +221,7 @@ async function upsertPhotoMetadata(
       height: dimensions.height,
       takenAt: existing?.takenAt ?? null,
       createdAt: previousCreatedAt,
-      updatedAt: metadataMode === 'reprocess' && existing ? existing.updatedAt : now,
+      updatedAt: now,
       deleted: existing?.deleted ?? false,
       deletedAt: existing?.deletedAt ?? null
     };
@@ -271,6 +271,7 @@ async function handleRemoved(originalKey: string): Promise<void> {
 
 async function renderWebpVariant(
   pipeline: sharp.Sharp,
+  sourceDimensions: ImageDimensions,
   dimensions: ImageDimensions,
   key: string,
   watermark: ResolvedWatermark
@@ -279,7 +280,7 @@ async function renderWebpVariant(
     pipeline = pipeline.resize({ width: dimensions.width, withoutEnlargement: true });
   }
 
-  pipeline = await applyWatermark(pipeline, dimensions, watermark);
+  pipeline = await applyWatermark(pipeline, dimensions, watermark, sourceDimensions);
 
   return {
     key,
@@ -322,13 +323,14 @@ async function renderFullVariant(
 async function applyWatermark(
   pipeline: sharp.Sharp,
   dimensions: ImageDimensions,
-  watermark: ResolvedWatermark
+  watermark: ResolvedWatermark,
+  referenceDimensions: ImageDimensions = dimensions
 ): Promise<sharp.Sharp> {
   if (!watermark.enabled || !watermark.profile || !watermark.source) {
     return pipeline;
   }
 
-  const overlay = await renderWatermarkOverlay(watermark.source, watermark.profile, dimensions);
+  const overlay = await renderWatermarkOverlay(watermark.source, watermark.profile, dimensions, referenceDimensions);
   if (!overlay) {
     return pipeline;
   }
@@ -345,14 +347,24 @@ async function applyWatermark(
 async function renderWatermarkOverlay(
   watermarkBuffer: Uint8Array,
   config: WatermarkProfile,
-  image: ImageDimensions
+  image: ImageDimensions,
+  referenceImage: ImageDimensions = image
 ): Promise<{ buffer: Buffer; left: number; top: number } | null> {
-  const shortestSide = Math.max(1, Math.min(image.width, image.height));
-  const widthBasis = Math.max(1, image.width);
-  const margin = Math.max(0, Math.round((config.marginPct / 100) * shortestSide));
+  const referenceWidth = Math.max(1, referenceImage.width);
+  const referenceHeight = Math.max(1, referenceImage.height);
+  const scale = Math.min(image.width / referenceWidth, image.height / referenceHeight);
+  const shortestSide = Math.max(1, Math.min(referenceWidth, referenceHeight));
+  const referenceMargin = Math.max(0, Math.round((config.marginPct / 100) * shortestSide));
+  const referenceMaxOverlayWidth = Math.max(1, referenceWidth - referenceMargin * 2);
+  const referenceDesiredWidth = Math.round((config.widthPct / 100) * referenceWidth);
+  const referenceTargetWidth = clamp(
+    referenceDesiredWidth,
+    config.minWidthPx,
+    Math.min(config.maxWidthPx, referenceMaxOverlayWidth)
+  );
+  const margin = Math.max(0, Math.round(referenceMargin * scale));
   const maxOverlayWidth = Math.max(1, image.width - margin * 2);
-  const desiredWidth = Math.round((config.widthPct / 100) * widthBasis);
-  const targetWidth = clamp(desiredWidth, config.minWidthPx, Math.min(config.maxWidthPx, maxOverlayWidth));
+  const targetWidth = clamp(Math.round(referenceTargetWidth * scale), 1, maxOverlayWidth);
 
   const buffer = await sharp(watermarkBuffer, { failOn: 'none' })
     .resize({ width: targetWidth, withoutEnlargement: false })

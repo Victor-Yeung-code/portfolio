@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { adminApi } from './api';
+import { refreshPhotoCache } from './republish-queue';
 import type { RepublishStatus } from './types';
 
 interface RepublishPanelProps {
@@ -44,12 +45,7 @@ export function RepublishPanel({ onDone, onError }: RepublishPanelProps) {
       setQueued(finalStatus.queued);
       setProcessing(finalStatus.processing);
       setMessage('Refreshing CloudFront cache.');
-      const invalidation = await adminApi.invalidatePhotos();
-      setMessage(
-        invalidation.invalidationId
-          ? `Cache refresh ${invalidation.invalidationId} started.`
-          : 'Cache refresh started.'
-      );
+      setMessage(await refreshPhotoCache());
       onDone();
     } catch (reason) {
       if (runIdRef.current === runId) {
@@ -106,7 +102,6 @@ async function waitForQueue(
     if (!isActive()) {
       return null;
     }
-
     const status = await adminApi.republishStatus();
     if (!isActive()) {
       return null;

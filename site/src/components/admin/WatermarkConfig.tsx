@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { adminApi, putSignedObject } from './api';
+import { refreshPhotoCache, waitForRepublishQueue } from './republish-queue';
 import type { PhotoEntry, WatermarkConfig, WatermarkProfile, WatermarkResponse } from './types';
 import { watermarkPositions } from './types';
 import { WatermarkPreview } from './WatermarkPreview';
@@ -124,6 +125,10 @@ export function WatermarkConfigPanel({ response, photos, onChanged, onNotice, on
             ? `${next.profile.name} saved. No photos use this profile yet.`
             : `Republishing ${next.queued} photo${next.queued === 1 ? '' : 's'} using ${next.profile.name}.`
         );
+        if (next.queued > 0) {
+          await waitForRepublishQueue();
+          onNotice(await refreshPhotoCache());
+        }
       } else {
         const next = await adminApi.createWatermarkProfile(profilePayload(draft));
         onChanged(next);

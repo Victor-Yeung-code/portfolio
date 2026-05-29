@@ -72,19 +72,23 @@ export async function fetchGallery(): Promise<GalleryJson> {
 }
 
 function normalizeGallery(input: Partial<GalleryJson>): GalleryJson {
+  const version = typeof input.version === 'number' ? input.version : 0;
+  const updatedAt = typeof input.updatedAt === 'string' ? input.updatedAt : emptyGallery.updatedAt;
+  const variantVersion = `${version}`;
+
   return {
-    version: typeof input.version === 'number' ? input.version : 0,
-    updatedAt: typeof input.updatedAt === 'string' ? input.updatedAt : emptyGallery.updatedAt,
+    version,
+    updatedAt,
     photos: Array.isArray(input.photos)
       ? input.photos
-          .map(normalizeGalleryPhoto)
+          .map((photo) => normalizeGalleryPhoto(photo, variantVersion))
           .filter((photo): photo is GalleryPhoto => photo !== null)
           .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id))
       : []
   };
 }
 
-function normalizeGalleryPhoto(input: unknown): GalleryPhoto | null {
+function normalizeGalleryPhoto(input: unknown, variantVersion: string): GalleryPhoto | null {
   if (typeof input !== 'object' || input === null) {
     return null;
   }
@@ -108,14 +112,19 @@ function normalizeGalleryPhoto(input: unknown): GalleryPhoto | null {
     album: stringValue(photo.album, ''),
     order: typeof photo.order === 'number' && Number.isFinite(photo.order) ? photo.order : 0,
     variants: {
-      thumb: stringValue(variants.thumb, ''),
-      medium: stringValue(variants.medium, ''),
-      full: stringValue(variants.full, '')
+      thumb: withVariantVersion(stringValue(variants.thumb, ''), variantVersion),
+      medium: withVariantVersion(stringValue(variants.medium, ''), variantVersion),
+      full: withVariantVersion(stringValue(variants.full, ''), variantVersion)
     },
     width: typeof photo.width === 'number' && Number.isFinite(photo.width) ? photo.width : 0,
     height: typeof photo.height === 'number' && Number.isFinite(photo.height) ? photo.height : 0,
     takenAt: typeof photo.takenAt === 'string' ? photo.takenAt : null
   };
+}
+
+function withVariantVersion(value: string, version: string): string {
+  const separator = value.includes('?') ? '&' : '?';
+  return `${value}${separator}v=${encodeURIComponent(version)}`;
 }
 
 function normalizeSiteConfig(input: Partial<SiteConfig>): SiteConfig {
